@@ -1,6 +1,9 @@
 (function () {
     'use strict';
 
+    const ds = require('data-service');
+    const { path } = require('ramda');
+
     /**
      * @param Base
      * @param {$rootScope.Scope} $scope
@@ -9,39 +12,79 @@
      * @param {IPollCreate} createPoll
      * @param {*} $templateRequest
      * @param {app.utils} utils
+     * @param {Storage} storage
+     * @param {ModalManager} modalManager
      * @return {SettingsCtrl}
      */
-    const controller = function (Base, $scope, waves, user, createPoll, $templateRequest, utils) {
+    const controller = function (Base,
+                                 $scope,
+                                 waves,
+                                 user,
+                                 createPoll,
+                                 $templateRequest,
+                                 utils,
+                                 storage,
+                                 modalManager) {
 
         class SettingsCtrl extends Base {
 
+            get openLinkViaWeb() {
+                return this.openClientMode === 'web';
+            }
+
+            set openLinkViaWeb(value) {
+                if (value) {
+                    this.openClientMode = 'web';
+                } else {
+                    this.openClientMode = null;
+                }
+                storage.save('openClientMode', this.openClientMode);
+            }
+
+            get advancedMode() {
+                return user.getSetting('advancedMode');
+            }
+
+            set advancedMode(mode) {
+                analytics.push('Settings', 'Settings.ChangeAdvancedMode', String(mode));
+                user.setSetting('advancedMode', mode);
+            }
+
+            assetsOracle = '';
+            tab = 'general';
+            address = user.address;
+            publicKey = user.publicKey;
+            shownSeed = false;
+            shownKey = false;
+            node = '';
+            matcher = '';
+            scamListUrl = '';
+            withScam = false;
+            theme = user.getSetting('theme');
+            candle = user.getSetting('candle');
+            shareStat = user.getSetting('shareAnalytics');
+            templatePromise = $templateRequest('modules/utils/modals/settings/loader.html');
+            openClientMode = null;
+            /**
+             * @type {number}
+             */
+            logoutAfterMin = null;
+
+            appName = WavesApp.name;
+            appVersion = WavesApp.version;
+            supportLink = WavesApp.network.support;
+            supportLinkName = WavesApp.network.support.replace(/^https?:\/\//, '');
+            blockHeight = 0;
+            assetsOracleTmp = '';
+            oracleData = path(['oracle'], ds.dataManager.getOracleData());
+            oracleError = false;
+            oraclePending = false;
+            oracleSuccess = false;
+
             constructor() {
                 super($scope);
-                this.tab = 'general';
-                this.address = user.address;
-                this.publicKey = user.publicKey;
-                this.shownSeed = false;
-                this.shownKey = false;
-                this.node = '';
-                this.matcher = '';
-                this.scamListUrl = '';
-                this.withScam = false;
-                this.theme = user.getSetting('theme');
-                this.candle = user.getSetting('candle');
-                this.shareStat = user.getSetting('shareAnalytics');
-                this.templatePromise = $templateRequest('modules/utils/modals/settings/loader.html');
 
-                /**
-                 * @type {number}
-                 */
-                this.logoutAfterMin = null;
-
-                this.appName = WavesApp.name;
-                this.appVersion = WavesApp.version;
-                this.supportLink = WavesApp.network.support;
-                this.supportLinkName = WavesApp.network.support.replace(/^https?:\/\//, '');
-                this.blockHeight = 0;
-
+                this.isScript = user.hasScript();
                 this.syncSettings({
                     node: 'network.node',
                     matcher: 'network.matcher',
@@ -49,7 +92,14 @@
                     scamListUrl: 'scamListUrl',
                     withScam: 'withScam',
                     theme: 'theme',
-                    candle: 'candle'
+                    candle: 'candle',
+                    assetsOracle: 'assetsOracle'
+                });
+
+                this.assetsOracleTmp = this.assetsOracle;
+
+                storage.load('openClientMode').then(mode => {
+                    this.openClientMode = mode;
                 });
 
                 this.observe('theme', () => {
@@ -61,6 +111,37 @@
                         },
                         () => user.changeTheme(this.theme)
                     );
+                });
+
+                this.observe('assetsOracle', () => {
+                    ds.config.set('oracleAddress', this.assetsOracle);
+                    this.assetsOracleTmp = this.assetsOracle;
+                });
+
+                this.observe('assetsOracleTmp', () => {
+                    const address = this.assetsOracleTmp;
+                    this.oraclePending = true;
+                    ds.api.data.getOracleData(address)
+                        .then(data => {
+                            if (data.oracle) {
+                                this.oracleData = data.oracle;
+                                ds.config.set('oracleAddress', address);
+                                this.assetsOracle = this.assetsOracleTmp;
+                                this.oracleError = false;
+                                this.oracleSuccess = true;
+                                setTimeout(() => {
+                                    this.oracleSuccess = false;
+                                    $scope.$apply();
+                                }, 1500);
+                            }
+                        })
+                        .catch(() => {
+                            this.oracleError = true;
+                        })
+                        .then(() => {
+                            this.oraclePending = false;
+                            $scope.$apply();
+                        });
                 });
 
                 // this.observe('candle', () => {
@@ -106,12 +187,22 @@
                     $scope.$digest();
                 }, 5000);
 
+                const catchProcessor = method => {
+                    try {
+                        return method().catch(() => null);
+                    } catch (e) {
+                        return Promise.resolve(null);
+                    }
+                };
+
                 Promise.all([
-                    ds.signature.getSignatureApi().getSeed(),
-                    ds.signature.getSignatureApi().getPrivateKey()
-                ]).then(([seed, key]) => {
+                    catchProcessor(() => ds.signature.getSignatureApi().getSeed()),
+                    catchProcessor(() => ds.signature.getSignatureApi().getPrivateKey()),
+                    ds.signature.getSignatureApi().getPublicKey()
+                ]).then(([seed, privateKey, publicKey]) => {
                     this.phrase = seed;
-                    this.privateKey = key;
+                    this.privateKey = privateKey;
+                    this.publicKey = publicKey;
                     $scope.$digest();
                 });
             }
@@ -126,6 +217,11 @@
                 this.matcher = WavesApp.network.matcher;
                 this.withScam = false;
                 this.scamListUrl = WavesApp.network.scamListUrl;
+                this.assetsOracle = WavesApp.oracle;
+            }
+
+            showPairingWithMobile() {
+                return modalManager.showPairingWithMobile();
             }
 
             showLoader(template) {
@@ -137,12 +233,26 @@
                 }, 4100);
             }
 
+            showScriptModal() {
+                modalManager.showScriptModal();
+            }
+
         }
 
         return new SettingsCtrl();
     };
 
-    controller.$inject = ['Base', '$scope', 'waves', 'user', 'createPoll', '$templateRequest', 'utils'];
+    controller.$inject = [
+        'Base',
+        '$scope',
+        'waves',
+        'user',
+        'createPoll',
+        '$templateRequest',
+        'utils',
+        'storage',
+        'modalManager'
+    ];
 
     angular.module('app.utils').controller('SettingsCtrl', controller);
 

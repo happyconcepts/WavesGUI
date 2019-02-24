@@ -11,18 +11,38 @@
 
         class ConfirmTxCtrl extends Base {
 
-            constructor(tx) {
+            /**
+             * @type {boolean}
+             * @private
+             */
+            _resolveOnClose = false;
+
+
+            constructor({ signable, showValidationErrors }) {
                 super($scope);
-                this.tx = tx;
+                this.signable = signable;
+                this.showValidationErrors = showValidationErrors;
             }
 
             back() {
                 $mdDialog.cancel();
             }
 
+            close() {
+                if (this._resolveOnClose) {
+                    $mdDialog.hide();
+                } else {
+                    $mdDialog.cancel();
+                }
+            }
+
+            onSendTransaction() {
+                this._resolveOnClose = true;
+            }
+
         }
 
-        return new ConfirmTxCtrl(this.tx);
+        return new ConfirmTxCtrl(this.locals);
     };
 
     controller.$inject = ['Base', '$scope', '$mdDialog'];

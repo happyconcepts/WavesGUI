@@ -39,23 +39,34 @@
                 <div class="icon-description footnote-1 basic-500" w-i18n="description.text2"></div>
                 <div class="description-split"></div>
                 <div class="footnote-1 basic-500 margin-1" w-i18n="description.text3"></div>
-                <a
-                    class="link"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    ng-href="{{::$ctrl.nodeListLink}}"
-                >
+                <a class="link"
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   ng-href="{{::$ctrl.nodeListLink}}">
                     <span w-i18n="nodeListLink"></span>
                 </a>
             </div>
         </w-leasing-block>
     </div>
     <div class="transactions-container">
-        <div class="transactions-title headline-4 basic-700" w-i18n="title"></div>
+        <div  w-i18n-ns="app.ui" class="controls margin-1">
+            <w-radio-wrap class="split-mode interface" ng-model="$ctrl.filter">
+                <w-radio value="'all'">
+                    <span w-i18n="all"></span>
+                </w-radio>
+                <w-radio value="'active'">
+                    <span w-i18n="transaction.headers.activeLeasing"></span>
+                </w-radio>
+                <w-radio value="'canceled'">
+                    <span w-i18n="transaction.headers.canceled"></span>
+                </w-radio>
+            </w-radio-wrap>
+        </div>
         <w-scroll-box>
             <div class="scroll-list">
                 <w-transaction-list transaction-date-pattern="dd.MM.yyyy HH:mm"
                                     pending="$ctrl.pending"
+                                    parent-selector="w-scroll-box"
                                     transactions="$ctrl.transactions"></w-transaction-list>
                 <div class="fake-transaction-line" ng-if="$ctrl.pendingAllLeasing">
                     <w-loader></w-loader>

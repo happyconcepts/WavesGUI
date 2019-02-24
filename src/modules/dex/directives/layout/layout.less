@@ -22,8 +22,14 @@ html body.dex-demo {
   }
 }
 
-w-layout {
+.tab-container,
+.tab-tem,
+w-tabs {
+  display: block;
+  height: 100%;
+}
 
+w-layout {
   width: 100%;
   height: 100%;
 
@@ -115,6 +121,7 @@ w-layout {
       width: 320px;
       max-height: calc(100% ~'- 308px');
       border-radius: @border-radius / 2;
+      overflow: visible;
 
       .block-title {
         display: none;
@@ -343,6 +350,87 @@ w-layout {
         margin-top: 0;
       }
     }
+
+    .tooltip-dex {
+      max-width: 300px;
+      display: none;
+      position: absolute;
+      padding: 0 10px;
+      top: 25px;
+      right: 149px;
+      transform-origin: center;
+      color: @color-white;
+      font-size: @font-size-caption-2;
+      line-height: 25px;
+      cursor: pointer;
+      text-shadow: 0 1px 6px rgba(78, 92, 110, 0.6);
+      z-index: 10;
+      width: auto;
+      text-align: center;
+      white-space: nowrap;
+
+      span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: inline-block;
+        text-align: center;
+      }
+
+      &::before {
+        position: absolute;
+        content: '';
+        z-index: -1;
+        top: -5px;
+        right: 10px;
+        opacity: .6;
+        width: 0;
+        height: 0;
+        border: 5px solid transparent;
+        border-bottom-color: @color-basic-700;
+        border-top: 0 none;
+        transform: translate(0);
+      }
+
+      &::after {
+        opacity: .6;
+        border-radius: @border-radius;
+        position: absolute;
+        background: @color-basic-700;
+        width: 100%;
+        height: 26px;
+        content: '';
+        left: 0;
+        top: 0;
+        z-index: -1;
+      }
+
+      &.right {
+        right: 10px;
+      }
+    }
+
+    .orderbook-table w-row:hover,
+    .smart-table__cell[data-column-id="volume"]:hover {
+      .tooltip-dex {
+        display: flex;
+      }
+    }
+
+    .orderbook-table,
+    .smart-table {
+      w-row:last-child,
+      &__row:last-child {
+        .tooltip-dex {
+          bottom: 100%;
+          top: auto;
+          &::before {
+            top: auto;
+            bottom: -6px;
+            transform: rotate(180deg);
+          }
+        }
+      }
+    }
   }
 
   .dex-layout__watchlist-collapsed.dex-layout__orderbook-collapsed {
@@ -379,45 +467,11 @@ w-layout {
     z-index: 1;
   }
 
-  //validation errors todo uIsk вынести в общие стили
   w-input-container {
-    position: relative;
-
-    span.error {
-      background: @color-error-400;
-      font-size: @font-size-caption-2;
-      position: absolute;
-      border-radius: @border-radius;
-      padding: 5px 10px;
-      display: inline-block;
-      top: 35px;
-      width: auto;
-      overflow: visible;
-      z-index: 3;
-
-      &.active {
-        color: @white-only;
-        height: 30px;
-        line-height: 20px;
-        padding: 5px 10px;
-      }
-
-      &::before {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        content: '';
-        transform: rotate(45deg);
-        top: -3px;
-        left: 20px;
-        z-index: 2;
-        position: absolute;
-        background: @color-error-400;
-      }
-
+    w-input-error .error {
+      padding: 12px;
     }
   }
-
 }
 
 html body.dex .notifications,
@@ -426,7 +480,6 @@ html body.dex-demo .notifications {
 }
 
 //tradehistory fullscreen mode
-
 .tradehistory-fullscreen-toggler {
   position: absolute;
   right: 10px;
@@ -441,6 +494,7 @@ html body.dex-demo .notifications {
   transition: all 0.3s;
   cursor: pointer;
 }
+
 .tradehistory-fullscreen-toggler:hover {
   background-color: @color-basic-100;
 }
@@ -448,15 +502,14 @@ html body.dex-demo .notifications {
 .tradehistory-fullscreen .tradehistory-fullscreen-toggler {
   background-image: @dex-fullscreenclose-icon;
 }
+
 .dex-layout__tradehistory {
   transition: .3s !important;
 }
-//end
-
 
 .tradehistory-fullscreen {
   .dex-layout__column:not(.dex-layout__tradehistory) {
-    transition:.3s;
+    transition: .3s;
     opacity: 0.1;
   }
 
@@ -469,10 +522,11 @@ html body.dex-demo .notifications {
     transition: .3s;
   }
 }
+//end
 
 //hi-res
-
 @media screen and (min-width: 2400px) {
+
   w-layout {
     .dex-layout {
 
@@ -499,10 +553,6 @@ html body.dex-demo .notifications {
 
       &__block {
         min-width: 360px;
-      }
-
-      &__column {
-        overflow: hidden;
       }
 
       &__watchlist {
@@ -553,7 +603,7 @@ html body.dex-demo .notifications {
 
           .fields {
             .input-like {
-              height: 44px;
+              height: 42px;
 
               .asset-name-wrap div {
                 line-height: 28px;
@@ -579,11 +629,9 @@ html body.dex-demo .notifications {
       .dex-wrapper {
         w-dex-watchlist {
           .wrapper a.title {
-
             .titles-wrap {
               height: 42px;
             }
-
             font-size: 13px;
           }
         }
@@ -651,7 +699,7 @@ html body.dex-demo .notifications {
             }
 
             .title {
-              height: 42px;
+              height: 41px;
               font-size: 13px;
             }
           }
@@ -659,6 +707,9 @@ html body.dex-demo .notifications {
           .title {
             height: 42px;
             font-size: 13px;
+            &.active {
+              background: @color-white;
+            }
           }
         }
       }
@@ -720,6 +771,10 @@ html body.dex-demo .notifications {
   w-layout {
     .dex-layout {
       overflow: visible;
+
+      .tradehistory-fullscreen-toggler {
+        display: none;
+      }
 
       &__watchlist {
         width: calc(50% ~' - 3px');
@@ -904,6 +959,10 @@ html body.dex-demo .notifications {
       flex-direction: column;
       justify-content: space-between;
 
+      .tradehistory-fullscreen-toggler {
+        display: none;
+      }
+
       &__column {
         position: relative;
       }
@@ -1014,10 +1073,12 @@ html body.dex-demo .notifications {
 .loading {
   opacity: 0;
 }
+
 .dex-loader {
   position: absolute;
   z-index: 0;
 }
+
 .dex-loader.loading {
   opacity: 1;
   position: absolute;

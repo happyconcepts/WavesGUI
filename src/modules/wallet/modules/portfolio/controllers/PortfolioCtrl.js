@@ -1,6 +1,23 @@
 (function () {
     'use strict';
 
+    const { get } = require('ts-utils');
+
+    const searchByNameAndId = ($scope, key, list) => {
+        const query = $scope[key];
+        if (!query) {
+            return list;
+        }
+
+        return list.filter((item) => {
+            const name = get({ item }, 'item.asset.name');
+            const id = get({ item }, 'item.asset.id');
+            return String(name).toLowerCase().indexOf(query.toLowerCase()) !== -1 || String(id) === query;
+        });
+    };
+
+    const ds = require('data-service');
+
     /**
      * @param {Base} Base
      * @param {$rootScope.Scope} $scope
@@ -12,10 +29,12 @@
      * @param {IPollCreate} createPoll
      * @param {GatewayService} gatewayService
      * @param {$state} $state
+     * @param {STService} stService
+     * @param {VisibleService} visibleService
      * @return {PortfolioCtrl}
      */
     const controller = function (Base, $scope, waves, utils, modalManager, user,
-                                 eventManager, createPoll, gatewayService, $state) {
+                                 eventManager, createPoll, gatewayService, $state, stService, visibleService) {
 
         class PortfolioCtrl extends Base {
 
@@ -74,7 +93,7 @@
                                 title: { literal: 'list.name' },
                                 valuePath: 'item.asset.name',
                                 sort: true,
-                                search: true,
+                                search: searchByNameAndId,
                                 placeholder: 'portfolio.filter'
                             },
                             {
@@ -127,6 +146,10 @@
 
                     this._onChangeDetails();
                 });
+
+                this.receive(stService.sort, () => {
+                    visibleService.updateSort();
+                });
             }
 
             /**
@@ -147,7 +170,7 @@
              * @param {Asset} asset
              */
             showReceivePopup(asset) {
-                return modalManager.showReceivePopup(user, asset);
+                return modalManager.showReceiveModal(user, asset);
             }
 
             /**
@@ -244,8 +267,11 @@
                     case 'spam':
                         balanceList = details.spam.slice();
                         break;
-                    case 'notLiquid':
-                        balanceList = details.notLiquid.slice();
+                    case 'my':
+                        balanceList = details.my.slice();
+                        break;
+                    case 'verified':
+                        balanceList = details.verified.slice();
                         break;
                     default:
                         throw new Error('Wrong filter name!');
@@ -266,7 +292,6 @@
                 const remapBalances = (item) => {
                     const isPinned = this._isPinned(item.asset.id);
                     const isSpam = this._isSpam(item.asset.id);
-                    item.asset.isMyAsset = item.asset.sender === user.address;
                     const isOnScamList = WavesApp.scam[item.asset.id];
 
                     return Promise.resolve({
@@ -275,7 +300,9 @@
                         inOrders: item.inOrders,
                         isPinned,
                         isSpam,
-                        isOnScamList
+                        isOnScamList,
+                        minSponsoredAssetFee: item.minSponsoredAssetFee,
+                        sponsorBalance: item.sponsorBalance
                     });
                 };
 
@@ -284,13 +311,27 @@
                 ]).then(([activeList]) => {
 
                     const spam = [];
+                    const my = [];
+                    const active = [];
+                    const verified = [];
 
-                    for (let i = activeList.length - 1; i >= 0; i--) {
-                        if (activeList[i].isOnScamList || activeList[i].isSpam) {
-                            spam.push(activeList.splice(i, 1)[0]);
+                    activeList.forEach(item => {
+                        const oracleData = ds.dataManager.getOracleAssetData(item.asset.id);
+
+                        if (item.asset.sender === user.address) {
+                            my.push(item);
                         }
-                    }
-                    return { active: activeList, spam };
+                        if (oracleData && oracleData.status > 0) {
+                            verified.push(item);
+                        }
+                        if (item.isOnScamList || item.isSpam) {
+                            spam.push(item);
+                        } else {
+                            active.push(item);
+                        }
+                    });
+
+                    return { active, spam, my, verified };
                 });
             }
 
@@ -327,7 +368,9 @@
         'eventManager',
         'createPoll',
         'gatewayService',
-        '$state'
+        '$state',
+        'stService',
+        'visibleService'
     ];
 
     angular.module('app.wallet.portfolio')
@@ -346,6 +389,8 @@
  * @property {Asset} asset
  * @property {Money} available
  * @property {Money} inOrders
+ * @property {Money|void} minSponsoredAssetFee
+ * @property {Money|void} sponsorBalance
  */
 
 /**
@@ -353,4 +398,6 @@
  * @property {Array<PortfolioCtrl.IPortfolioBalanceDetails>} active
  * @property {Array<PortfolioCtrl.IPortfolioBalanceDetails>} pinned // TODO when available assets store
  * @property {Array<PortfolioCtrl.IPortfolioBalanceDetails>} spam
+ * @property {Array<PortfolioCtrl.IPortfolioBalanceDetails>} my
+ * @property {Array<PortfolioCtrl.IPortfolioBalanceDetails>} verified
  */

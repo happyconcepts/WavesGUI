@@ -79,7 +79,7 @@
              * @return {JQuery.jqXHR}
              */
             search(query) {
-                return $.get(`https://api.wavesplatform.com/assets/search/${encodeURIComponent(query)}`, (data) => {
+                return $.get(`${WavesApp.network.api}/assets/search/${encodeURIComponent(query)}`, (data) => {
                     return data.map((item) => {
                         item.name = WavesApp.remappedAssetNames[item.id] || item.name;
                         return item;
@@ -147,7 +147,7 @@
              * @private
              */
             _getScamAssetList() {
-                return ds.fetch(`${user.getSetting('scamListUrl')}?${Date.now()}`)
+                return ds.fetch(`${user.getSetting('scamListUrl')}?${WavesApp.version}-${Date.now()}`)
                     .then((text) => {
                         const papa = require('papaparse');
                         const hash = Object.create(null);

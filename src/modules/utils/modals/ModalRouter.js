@@ -5,14 +5,14 @@
      * @param {User} user
      * @param {ModalManager} modalManager
      * @param {Waves} waves
-     * @param {Router} router
-     * @param {$rootScope.Scope} $rootScope
+     * @param {typeof Router} Router
      * @param {app.utils} utils
      * @return {ModalRouter}
      */
-    const factory = function (user, modalManager, waves, router, $rootScope, utils) {
+    const factory = function (user, modalManager, waves, Router, utils) {
 
         class ModalRouter {
+
 
             constructor() {
                 /**
@@ -21,11 +21,23 @@
                  */
                 this._sleep = false;
                 /**
-                 * @type {{url: string, search: string}}
+                 * @type string
                  * @private
                  */
                 this._firstUrl = ModalRouter._getUrlData();
-                router.registerRouteHash(this._wrapClose(this._getRoutes()));
+                this._router = new Router();
+                this._router.registerRouteHash(this._wrapClose(this._getRoutes()));
+
+                if (WavesApp.isDesktop()) {
+                    window.listenMainProcessEvent((eventType, urlString) => {
+                        user.onLogin().then(() => {
+                            const { hash } = utils.parseElectronUrl(urlString);
+                            if (hash) {
+                                this._apply(ModalRouter._getUrlData(hash.replace('#', '')));
+                            }
+                        });
+                    });
+                }
             }
 
             initialize() {
@@ -41,10 +53,11 @@
             }
 
             /**
+             * @param {string} url
              * @private
              */
-            _apply({ url, search }) {
-                return router.apply(url, utils.parseSearchParams(search));
+            _apply(url) {
+                return this._router.apply(url);
             }
 
             /**
@@ -53,18 +66,19 @@
              */
             _getRoutes() {
                 return {
-                    '/send': () => modalManager.showSendAsset(),
-                    '/send/:assetId': ({ assetId }, search) => {
+                    [Router.ROUTES.SEND]: () => modalManager.showSendAsset(),
+                    [Router.ROUTES.SEND_ASSET]: ({ assetId }, search) => {
                         return modalManager.showSendAsset({ ...search, assetId });
                     },
-                    '/asset/:assetId': ({ assetId }) => {
+                    [Router.ROUTES.ASSET_INFO]: ({ assetId }) => {
                         return waves.node.assets.getAsset(assetId).then((asset) => {
                             return modalManager.showAssetInfo(asset);
                         });
                     },
                     // '/receive': () => modalManager.showReceiveAsset(user), // TODO : decide on that
-                    '/account': () => modalManager.showAccountInfo(),
-                    '/gateway/auth': (params, search) => modalManager.showGatewaySign(search)
+                    [Router.ROUTES.ACCOUNT]: () => modalManager.showAccountInfo(),
+                    [Router.ROUTES.GATEWAY_AUTH]: (params, search) => modalManager.showGatewaySign(search),
+                    [Router.ROUTES.ANY_TX]: (params, search) => modalManager.showAnyTx(search)
                 };
             }
 
@@ -96,13 +110,26 @@
             }
 
             /**
-             * @return {{url: string, search: string}}
+             * @param {string} [fromUrl]
+             * @return {string}
              * @private
              */
-            static _getUrlData() {
-                const fullUrl = `/${decodeURIComponent(location.hash.replace('#', ''))}`;
-                const [url, search] = fullUrl.split('?');
-                return { url, search };
+            static _getUrlData(fromUrl) {
+                return `/${decodeURIComponent(fromUrl || ModalRouter._getLocation())}`;
+            }
+
+            /**
+             * @return {string}
+             * @private
+             */
+            static _getLocation() {
+                if (WavesApp.isDesktop()) {
+                    const lastIndex = location.hash.lastIndexOf('#');
+                    const firstIndex = location.hash.indexOf('#');
+                    return lastIndex > firstIndex ? location.hash.slice(lastIndex + 1) : '';
+                } else {
+                    return location.hash.replace('#', '');
+                }
             }
 
         }
@@ -110,7 +137,7 @@
         return ModalRouter;
     };
 
-    factory.$inject = ['user', 'modalManager', 'waves', 'router', '$rootScope', 'utils'];
+    factory.$inject = ['user', 'modalManager', 'waves', 'Router', 'utils'];
 
     angular.module('app.ui').factory('ModalRouter', factory);
 })();

@@ -5,12 +5,52 @@
 
 @tx-icon-size: 80px;
 
+md-dialog.txinfo {
+  md-dialog-content {
+    padding-top: 0;
+  }
+}
+
+w-transaction-info,
+w-transaction-info-header,
+w-transaction-info-content,
+w-transaction-export,
+w-transaction-info-json {
+  display: block;
+  width: 100%;
+}
+
+w-transaction-info-general {
+  .txinfo__row:first-child {
+    border-top-style: dashed;
+  }
+}
+
+w-transaction-info-header + w-transaction-info-general {
+  .txinfo__row:first-child {
+    border-top-style: solid;
+  }
+}
+
 .txinfo {
   display: block;
   width: 100%;
 
   &__data {
     width: 100%;
+  }
+
+  .note-plate {
+    position: relative;
+    margin: 0 0 20px;
+    background: @color-basic-50;
+    border: 1px dashed @color-basic-200;
+    padding: 14px;
+    border-radius: @border-radius;
+    min-height: 54px;
+    display: flex;
+    width: 100%;
+    align-items: center;
   }
 
   .noborder {
@@ -35,28 +75,30 @@
     flex-direction: column;
     align-items: center;
 
-    w-transaction-info {
+    .bottom-warning {
       width: 100%;
-
-      .bottom-warning {
-        position: relative;
-        background: @color-white;
-        margin-bottom: -1px;
-        padding-top: 30px;
-        border-top: 1px solid #dae1e9;
-      }
+      position: relative;
+      background: @color-white;
+      margin-bottom: -1px;
+      padding-top: 30px;
+      border-top: 1px solid @color-basic-100;
     }
   }
 
   &__lead {
     text-align: center;
-    padding: 20px 0 30px;
+    padding: 0 0 30px;
     border-bottom: 1px solid @color-basic-100;
     .noborder();
     z-index: 2;
 
+    &.noborder {
+      border-bottom: 0 none;
+      margin: 0;
+    }
+
     h3 {
-      margin-bottom: 6px;
+      margin: 0 0 6px;
     }
   }
 
@@ -67,6 +109,10 @@
     justify-content: space-between;
     padding: 13px 0;
     border-top: 1px dashed @color-basic-100;
+
+    &:first-child {
+      border-top: 1px solid @color-basic-100;
+    }
 
     &-header {
       border-bottom: 1px solid @color-basic-100;
@@ -109,9 +155,8 @@
       .key-props {
         flex-basis: auto;
         flex-grow: 0;
-        padding-right: 10px;
+        padding-right: 20px;
         overflow: hidden;
-        word-break: break-all;
         .footnote-1();
       }
 
@@ -128,17 +173,28 @@
       &__value {
         flex-basis: auto;
         flex-grow: 0;
-        padding-left: 10px;
         text-align: right;
         word-break: break-all;
         .footnote-1();
         color: @color-basic-900;
+        &:first-letter {
+          text-transform: uppercase;
+        }
+        &-name {
+          margin-left: 5px;
+          display: inline-block;
+        }
       }
 
       &__text {
         flex-basis: 100%;
         flex-grow: 1;
         text-align: left;
+      }
+
+      &__data {
+        max-height: 140px;
+        overflow: scroll;
       }
     }
 
@@ -153,7 +209,7 @@
     background: none transparent;
     position: relative;
     border-radius: 50%;
-    margin: 10px auto 0 auto;
+    margin: 60px auto 30px;
 
     &.send {
       .icon-tx-send();
@@ -188,7 +244,8 @@
     }
 
     &.exchange-buy,
-    &.exchange-sell {
+    &.exchange-sell,
+    &.create-order {
       .icon-tx-exchange();
     }
 
@@ -211,6 +268,38 @@
     &.cancel-leasing {
       .icon-tx-cancel-leasing();
     }
+
+    &.data {
+      .icon-tx-data();
+    }
+
+    &.sponsorship-start {
+      .icon-tx-sponsorship-start();
+    }
+
+    &.sponsorship-stop {
+      .icon-tx-sponsorship-stop();
+    }
+
+    &.sponsorship-fee {
+      .icon-tx-sponsorship-plus();
+    }
+
+    &.set-script {
+      .icon-tx-set-script();
+    }
+
+    &.set-script-cancel {
+      .icon-tx-cancel-script();
+    }
+
+    &.set-asset-script {
+      .icon-tx-set-asset-script();
+    }
+
+    //&.sponsorship-minus {
+    //  .icon-tx-sponsorship-minus();
+    //}
 
     &::before {
       width: @tx-icon-size;
@@ -248,18 +337,17 @@
     }
 
     &.unconfirmed {
-      background: @color-warning-50;
+      background: rgba(255, 175, 0, 0.1);
       color: @color-warning-500;
     }
   }
-
 }
 
 @media screen and (max-width: 540px) {
   .txinfo {
     .icon-close {
-      top: 0;
-      right: 0;
+      top: 5px;
+      right: 5px;
     }
 
     &__lead {
@@ -276,18 +364,6 @@
       &-padder {
         height: 30px;
       }
-
-      .txinfo {
-        .key-props {
-          flex-basis: 50%;
-          max-width: 50%;
-        }
-
-        &__value {
-          flex-basis: 50%;
-        }
-      }
-
     }
   }
 }

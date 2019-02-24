@@ -12,15 +12,22 @@
      */
     const controller = function (Base, $scope, user, createPoll, utils, waves) {
 
+        const ds = require('data-service');
+        const { path } = require('ramda');
+        const { STATUS_LIST } = require('@waves/oracle-data');
+
         class AssetInfoCtrl extends Base {
 
+            /**
+             * @param {Asset} asset
+             */
             constructor(asset) {
                 super($scope);
                 this.asset = asset;
                 this.wavesId = WavesApp.defaultAssets.WAVES;
                 this.isDemo = !user.address;
                 this.quantity = this.asset.quantity.div(new BigNumber(10).pow(this.asset.precision)).toFormat();
-
+                this.minFee = ds.utils.getTransferFeeList().find(money => money.asset.id === this.asset.id);
                 const assetList = user.getSetting('pinnedAssetIdList');
                 this.assetList = assetList;
                 this.pinned = assetList.indexOf(asset.id) !== -1;
@@ -29,10 +36,26 @@
                 this.totalBalance = null;
                 this.transactions = [];
                 this.transactionsPending = true;
+                const data = ds.dataManager.getOracleAssetData(asset.id);
+                this.isVerified = path(['status'], data) === STATUS_LIST.VERIFIED;
+                this.isGateway = path(['status'], data) === 3;
+                this.isSuspicious = WavesApp.scam[this.asset.id];
+                this.hasLabel = this.isVerified || this.isGateway || this.isSuspicious;
+
+                // this.ticker = path(['ticker'], data); // TODO STEP 2
+                this.ticker = asset.ticker; // TODO STEP 2
+                this.link = path(['link'], data);
+                this.email = path(['email'], data);
+                this.provider = this.isVerified && path(['provider'], data) || null;
+                this.description = path(['description', 'en'], data) || asset.description;
+
+                this.withScam = null;
+                this.spam = [];
+
                 /**
                  * @type {string}
                  */
-                this.tab = null;
+                this.tab = 'info';
 
                 this.chartOptions = {
                     items: {
@@ -58,7 +81,7 @@
                 if (!this.isDemo) {
                     const isBalance = true;
                     createPoll(this, this._getCircleGraphData, this._setCircleGraphData, 15000);
-                    createPoll(this, () => waves.node.transactions.list(100), this._setTxList, 4000, { isBalance });
+                    createPoll(this, AssetInfoCtrl._getTxList, this._setTxList, 4000, { isBalance, $scope });
                 }
             }
 
@@ -97,13 +120,16 @@
                         case TYPES.ISSUE:
                         case TYPES.REISSUE:
                         case TYPES.BURN:
-                            return (tx.amount && tx.amount.asset || tx.quantity.asset).id === this.asset.id;
+                            return (tx.assetId || tx.amount && tx.amount.asset.id) === this.asset.id;
+                        case TYPES.SPONSORSHIP_START:
+                        case TYPES.SPONSORSHIP_STOP:
+                            return tx.assetId === this.asset.id;
+                        case TYPES.SPONSORSHIP_FEE:
+                            return this.asset.id === tx.feeAssetId;
                         default:
                             return false;
                     }
                 });
-
-                $scope.$digest();
             }
 
             /**
@@ -117,10 +143,20 @@
                     .catch(() => ({ values: null }));
             }
 
+            /**
+             * @return {*}
+             * @private
+             */
             _getCircleGraphData() {
                 return waves.node.assets.balance(this.asset.id);
             }
 
+            /**
+             * @param available
+             * @param leasedOut
+             * @param inOrders
+             * @private
+             */
             _setCircleGraphData({ available, leasedOut, inOrders }) {
                 this.circleChartData = [
                     { id: 'available', value: available },
@@ -129,6 +165,10 @@
                 ];
                 this.totalBalance = available.add(leasedOut).add(inOrders);
                 $scope.$digest();
+            }
+
+            static _getTxList() {
+                return waves.node.transactions.list(100);
             }
 
         }

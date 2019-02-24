@@ -3,6 +3,7 @@
 (function () {
     'use strict';
 
+    const locationHref = location.href;
     const tsUtils = require('ts-utils');
 
     const PROGRESS_MAP = {
@@ -68,6 +69,7 @@
         $rootScope.isDesktop = isDesktop;
         $rootScope.isNotDesktop = !isDesktop;
         $rootScope.isPhone = isPhone;
+        $rootScope.isNotPhone = !isPhone;
         $rootScope.isTablet = isTablet;
 
         if (isPhone) {
@@ -106,7 +108,59 @@
                 this._initializeLogin();
                 this._initializeOutLinks();
 
+                if (WavesApp.isDesktop()) {
+                    window.listenMainProcessEvent((type, url) => {
+                        const parts = utils.parseElectronUrl(url);
+                        const path = parts.path.replace(/\/$/, '') || parts.path;
+                        if (path) {
+                            const noLogin = path === '/' || WavesApp.stateTree.where({ noLogin: true }).some(item => {
+                                const url = item.get('url') || item.id;
+                                return path === url;
+                            });
+                            if (noLogin) {
+                                location.hash = `#!${path}${parts.search}`;
+                            } else {
+                                user.onLogin().then(() => {
+                                    setTimeout(() => {
+                                        location.hash = `#!${path}${parts.search}`;
+                                    }, 1000);
+                                });
+                            }
+                        }
+                    });
+                }
+
                 $rootScope.WavesApp = WavesApp;
+            }
+
+            _initTryDesktop() {
+                if (!isDesktop || WavesApp.isDesktop()) {
+                    return Promise.resolve(true);
+                }
+
+                const url = new URL(locationHref);
+                const href = `waves://${url.pathname}${url.search}${url.hash}`.replace('///', '//');
+
+                return storage.load('openClientMode').then(clientMode => {
+                    switch (clientMode) {
+                        case 'desktop':
+                            window.open(href);
+                            return this._runDesktop();
+                        case 'web':
+                            return Promise.resolve(true);
+                        default:
+                            return modalManager.showTryDesktopModal()
+                                .then(() => this._runDesktop())
+                                .catch(() => true);
+                    }
+                });
+            }
+
+            _runDesktop() {
+                this._canOpenDesktopPage = true;
+                $state.go('desktop');
+
+                return false;
             }
 
             /**
@@ -158,9 +212,6 @@
             _initializeLogin() {
 
                 let needShowTutorial = false;
-                const promise = storage.onReady().then((oldVersion) => {
-                    needShowTutorial = !oldVersion;
-                });
 
                 this._listenChangeLanguage();
 
@@ -171,8 +222,19 @@
 
                 const stop = $rootScope.$on('$stateChangeStart', (event, toState, params) => {
 
+                    let tryDesktop;
+
                     if (START_STATES.indexOf(toState.name) === -1) {
                         event.preventDefault();
+                    }
+
+                    if (toState.name === 'desktop' && !this._canOpenDesktopPage) {
+                        event.preventDefault();
+                        $state.go(START_STATES[0]);
+                    }
+
+                    if (waiting) {
+                        return null;
                     }
 
                     if (needShowTutorial && toState.name !== 'dex-demo') {
@@ -180,9 +242,18 @@
                         needShowTutorial = false;
                     }
 
-                    if (waiting) {
-                        return null;
+                    if (toState.name === 'main.dex-demo') {
+                        tryDesktop = Promise.resolve();
+                    } else {
+                        tryDesktop = this._initTryDesktop();
                     }
+
+                    const promise = Promise.all([
+                        storage.onReady(),
+                        tryDesktop
+                    ]).then(([oldVersion, canOpenTutorial]) => {
+                        needShowTutorial = canOpenTutorial && !oldVersion;
+                    });
 
                     promise.then(() => {
                         if (needShowTutorial && toState.name !== 'dex-demo') {
@@ -193,7 +264,8 @@
 
                     waiting = true;
 
-                    this._login(toState)
+                    tryDesktop
+                        .then((canChangeState) => this._login(toState, canChangeState))
                         .then(() => {
                             stop();
 
@@ -303,10 +375,11 @@
 
             /**
              * @param {{name: string}} currentState
+             * @param {boolean} canChangeState
              * @return {Promise}
              * @private
              */
-            _login(currentState) {
+            _login(currentState, canChangeState) {
                 // const sessions = sessionBridge.getSessionsData();
 
                 const states = WavesApp.stateTree.where({ noLogin: true })
@@ -314,13 +387,14 @@
                         return WavesApp.stateTree.getPath(item.id)
                             .join('.');
                     });
-                if (states.indexOf(currentState.name) === -1) {
+                if (canChangeState && states.indexOf(currentState.name) === -1) {
                     // if (sessions.length) {
                     //     $state.go('sessions');
                     // } else {
                     $state.go(states[0]);
                     // }
                 }
+
                 return user.onLogin();
             }
 
@@ -397,13 +471,18 @@
 
             static getLoadImagePromise(length) {
                 return function (path) {
-                    return new Promise((resolve, reject) => {
+                    return new Promise(resolve => {
                         const img = new Image();
-                        img.onload = () => {
+                        const apply = () => {
                             LOADER.addProgress(PROGRESS_MAP.IMAGES_LOADED / length);
                             resolve();
                         };
-                        img.onerror = reject;
+
+                        img.onload = apply;
+                        img.onerror = () => {
+                            console.warn(`Can't load image! "${path}"`);
+                            apply();
+                        };
                         img.src = path;
                     });
                 };
@@ -437,6 +516,7 @@
         'decorators',
         'waves',
         'ModalRouter',
+        'configService',
         'whatsNew'
     ];
 
@@ -448,5 +528,6 @@
  * @property {boolean} $rootScope.Scope#isDesktop
  * @property {boolean} $rootScope.Scope#isNotDesktop
  * @property {boolean} $rootScope.Scope#isPhone
+ * @property {boolean} $rootScope.Scope#isNotPhone
  * @property {boolean} $rootScope.Scope#isTablet
  */

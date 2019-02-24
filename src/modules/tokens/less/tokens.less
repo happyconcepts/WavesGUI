@@ -24,13 +24,21 @@ body.tokens {
     border-radius: @border-radius;
     box-shadow: @shadow-type-1;
 
-    w-select.issue-select {
-      white-space: nowrap;
+    w-select {
+      .issue-select {
+        white-space: nowrap;
+      }
     }
 
     .token-page__content {
       height: calc(~'100% - 1px - ' @height-title);
       overflow: auto;
+
+      &::after {
+        display: block;
+        content: '';
+        height: 40px;
+      }
     }
 
     textarea {
@@ -154,6 +162,10 @@ body.tokens {
 
       .row {
         margin-top: 20px;
+
+        &-script {
+          margin-top: 10px;
+        }
       }
     }
   }
@@ -161,14 +173,12 @@ body.tokens {
 
 @media screen and (max-width: 768px) {
   body.tokens {
-
     .main-content .content {
       height: calc(100vh ~'- 60px');
       width: 100%;
     }
 
     .token-page {
-
       .generate-form {
         padding: 0 10px;
         width: 100%;
@@ -187,7 +197,6 @@ body.tokens {
         position: relative;
         top: 4px;
       }
-
     }
   }
 }

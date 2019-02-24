@@ -18,6 +18,9 @@
         [WavesApp.otherAssetsWithIcons.WNET]: '/img/assets/wnet.svg'
     };
 
+    const ds = require('data-service');
+    const { isEmpty } = require('ts-utils');
+
     const COLORS_MAP = {
         A: '#39a12c',
         B: '#6a737b',
@@ -60,31 +63,62 @@
 
         class AssetLogo extends Base {
 
+            /**
+             * @type {string}
+             */
+            assetId;
+            /**
+             * @type {string}
+             */
+            assetName;
+            /**
+             * @type {number}
+             */
+            size;
+            /**
+             * @type {boolean}
+             */
+            hasScript;
+            /**
+             * @type {boolean}
+             * @private
+             */
+            _canPayFee = false;
+            /**
+             * @type {boolean}
+             * @private
+             */
+            _isSmart = false;
+
+
             constructor() {
                 super();
-                /**
-                 * @type {string}
-                 */
-                this.assetId = null;
-                /**
-                 * @type {string}
-                 */
-                this.assetName = null;
-                /**
-                 * @type {number}
-                 */
-                this.size = null;
+
+                this.observe('_canPayFee', this._onChangeCanPayFee);
+                this.observe(['_isSmart', 'hasScript'], this._onChangeIsSmart);
             }
+
 
             $postLink() {
                 if (!this.size || !(this.assetName || this.assetId)) {
                     throw new Error('Wrong params!');
                 }
-                $element.find('.asset-logo')
+
+                this._canPayFee = !!ds.utils.getTransferFeeList()
+                    .find(money => money.asset.id === this.assetId);
+
+                if (this.assetId) {
+                    waves.node.assets.getAsset(this.assetId).then(asset => {
+                        this._isSmart = asset.hasScript;
+                    });
+                }
+
+                $element.find('.asset__logo')
                     .css({
                         width: `${this.size}px`,
                         height: `${this.size}px`
                     });
+
                 this._addLogo();
             }
 
@@ -93,12 +127,19 @@
              */
             _addLogo() {
                 if (this.assetId) {
+                    const data = ds.dataManager.getOracleAssetData(this.assetId);
+                    if (data && data.logo) {
+                        $element.find('.asset__logo')
+                            .addClass('custom')
+                            .css('backgroundImage', `url(${data.logo})`);
+                        return null;
+                    }
                     waves.node.assets.getAsset(this.assetId)
                         .then((asset) => {
                             if (ASSET_IMAGES_MAP[asset.id]) {
                                 utils.loadImage(ASSET_IMAGES_MAP[asset.id])
                                     .then(() => {
-                                        $element.find('.asset-logo')
+                                        $element.find('.asset__logo')
                                             .css('backgroundImage', `url(${ASSET_IMAGES_MAP[asset.id]})`);
                                     })
                                     .catch(() => this._addLetter(asset.name));
@@ -121,12 +162,34 @@
                     .toUpperCase();
                 const color = COLORS_MAP[letter] || DEFAULT_COLOR;
                 const fontSize = Math.round((Number(this.size) || 0) * 0.43);
-                $element.find('.asset-logo')
+                $element.find('.asset__logo')
+                    .css({
+                        'background-color': color
+                    });
+                $element.find('.asset__logo .letter')
                     .text(letter)
                     .css({
-                        'background-color': color,
                         'font-size': `${fontSize}px`
                     });
+                $element.find('.asset__logo .marker')
+                    .css({
+                        'background-color': color
+                    });
+            }
+
+            /**
+             * @private
+             */
+            _onChangeCanPayFee() {
+                $element.find('.marker').toggleClass('sponsored-asset', this._canPayFee);
+            }
+
+            /**
+             * @private
+             */
+            _onChangeIsSmart() {
+                const isSmart = isEmpty(this.hasScript) ? this._isSmart : this.hasScript;
+                $element.find('.marker').toggleClass('smart-asset', isSmart);
             }
 
         }
@@ -138,10 +201,11 @@
 
     angular.module('app.ui')
         .component('wAssetLogo', {
-            template: '<div class="asset-logo footnote-3"></div>',
+            template: '<div class="asset__logo footnote-3"><div class="letter"></div><div class="marker"></div></div>',
             controller: controller,
             bindings: {
                 assetId: '@',
+                hasScript: '<',
                 assetName: '<',
                 size: '@'
             }

@@ -1,6 +1,6 @@
 import { Money, BigNumber } from '@waves/data-entities';
 import { IAssetPair, TLeasingStatus, TOrderType } from '../../interface';
-import { TRANSACTION_TYPE_NUMBER } from '@waves/waves-signature-generator';
+import { TRANSACTION_TYPE_NUMBER } from '@waves/signature-generator';
 
 
 export type T_API_TX =
@@ -13,7 +13,11 @@ export type T_API_TX =
     txApi.ILease |
     txApi.ICancelLeasing |
     txApi.ICreateAlias |
-    txApi.IMassTransfer;
+    txApi.IMassTransfer |
+    txApi.IData |
+    txApi.ISponsorship |
+    txApi.ISetScript |
+    txApi.ISetAssetScript;
 
 export type T_TX =
     IIssue |
@@ -24,7 +28,11 @@ export type T_TX =
     ILease |
     ICancelLeasing |
     ICreateAlias |
-    IMassTransfer;
+    IMassTransfer |
+    IData |
+    ISponsorship |
+    ISetScript |
+    ISetAssetScript;
 
 export module txApi {
 
@@ -49,7 +57,7 @@ export module txApi {
 
     export interface IIssue extends IBaseTransaction {
         type: TRANSACTION_TYPE_NUMBER.ISSUE;
-        precision: number;
+        decimals: number;
         description: string;
         name: string;
         quantity: string;
@@ -63,7 +71,7 @@ export module txApi {
         assetId: string;
         attachment: string;
         fee: string;
-        feeAsset: string;
+        feeAssetId: string;
         recipient: string;
     }
 
@@ -116,13 +124,38 @@ export module txApi {
 
     export interface IMassTransfer extends IBaseTransaction {
         type: TRANSACTION_TYPE_NUMBER.MASS_TRANSFER;
-        assetId: string;
         version?: number;
+        assetId: string;
         attachment: string;
         fee: string;
         totalAmount: string;
         transferCount: number;
         transfers: Array<{ amount: string; recipient: string; }>
+    }
+
+    export interface IData extends IBaseTransaction {
+        type: TRANSACTION_TYPE_NUMBER.DATA;
+        version?: number;
+        data: Array<TDataEntry>;
+    }
+
+    export interface ISponsorship extends IBaseTransaction {
+        type: TRANSACTION_TYPE_NUMBER.SPONSORSHIP;
+        version?: number;
+        minSponsoredAssetFee: string | number;
+        assetId: string;
+    }
+
+    export interface ISetScript extends IBaseTransaction {
+        type: TRANSACTION_TYPE_NUMBER.SET_SCRIPT;
+        version?: number;
+        script: string;
+    }
+
+    export interface ISetAssetScript extends IBaseTransaction {
+        type: TRANSACTION_TYPE_NUMBER.SET_ASSET_SCRIPT;
+        version?: number;
+        script: string;
     }
 
     export interface IExchangeOrder {
@@ -165,7 +198,7 @@ export interface IIssue extends IBaseTransaction {
     precision: number;
     description: string;
     name: string;
-    quantity: Money;
+    quantity: BigNumber;
     reissuable: boolean;
     fee: Money;
 }
@@ -177,7 +210,7 @@ export interface ITransfer extends IBaseTransaction {
     attachment: string;
     rawAttachment: string;
     fee: Money;
-    feeAsset: string;
+    feeAssetId: string;
     recipient: string;
 }
 
@@ -224,7 +257,7 @@ export interface ICancelLeasing extends IBaseTransaction {
     type: TRANSACTION_TYPE_NUMBER.CANCEL_LEASING;
     fee: Money;
     leaseId: string;
-    lease: ILease;
+    lease?: ILease;
 }
 
 export interface ICreateAlias extends IBaseTransaction {
@@ -235,14 +268,41 @@ export interface ICreateAlias extends IBaseTransaction {
 
 export interface IMassTransfer extends IBaseTransaction {
     type: TRANSACTION_TYPE_NUMBER.MASS_TRANSFER;
-    assetId: string;
     version?: number;
+    assetId: string;
     attachment: string;
     rawAttachment: string;
     fee: Money;
     totalAmount: Money;
     transferCount: number;
     transfers: Array<{ amount: Money; recipient: string; }>
+}
+
+export interface IData extends IBaseTransaction {
+    type: TRANSACTION_TYPE_NUMBER.DATA;
+    version?: number;
+    data: Array<TDataEntry>;
+    stringifiedData: string;
+    fee: Money;
+}
+
+export interface ISponsorship extends IBaseTransaction {
+    type: TRANSACTION_TYPE_NUMBER.SPONSORSHIP;
+    version?: number;
+    assetId: string
+    minSponsoredAssetFee: Money;
+}
+
+export interface ISetScript extends IBaseTransaction {
+    type: TRANSACTION_TYPE_NUMBER.SET_SCRIPT;
+    version?: number;
+    script: string;
+}
+
+export interface ISetAssetScript extends IBaseTransaction {
+    type: TRANSACTION_TYPE_NUMBER.SET_ASSET_SCRIPT;
+    version?: number;
+    script: string;
 }
 
 export interface IExchangeOrder {
@@ -258,4 +318,30 @@ export interface IExchangeOrder {
     senderPublicKey: string;
     signature: string;
     timestamp: number;
+}
+
+export type TDataEntry = TDataEntryInteger | TDataEntryBoolean | TDataEntryBinary | TDataEntryString;
+
+export interface TDataEntryInteger {
+    type: 'integer';
+    key: string;
+    value: number;
+}
+
+export interface TDataEntryBoolean {
+    type: 'boolean';
+    key: string;
+    value: boolean;
+}
+
+export interface TDataEntryBinary {
+    type: 'binary';
+    key: string;
+    value: string; // base64
+}
+
+export interface TDataEntryString {
+    type: 'string';
+    key: string;
+    value: string;
 }

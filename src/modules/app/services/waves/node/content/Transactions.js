@@ -12,6 +12,9 @@
     const factory = function (user, utils, aliases, decorators, BaseNodeComponent) {
 
         const tsUtils = require('ts-utils');
+        const R = require('ramda');
+        const { SIGN_TYPE } = require('@waves/signature-adapter');
+        const ds = require('data-service');
 
         const TYPES = WavesApp.TRANSACTION_TYPES.EXTENDED;
 
@@ -63,7 +66,7 @@
             @decorators.cachable(1)
             list(limit = 1000) {
                 return ds.api.transactions.list(user.address, limit)
-                    .then((list) => list.map(this._pipeTransaction()));
+                    .then(list => list.map(this._pipeTransaction()));
             }
 
             /**
@@ -72,8 +75,10 @@
             @decorators.cachable(120)
             getActiveLeasingTx() {
                 return ds.fetch(`${this.node}/leasing/active/${user.address}`)
-                    .then((list) => ds.api.transactions.parseTx(list, false))
-                    .then((list) => list.map(this._pipeTransaction()));
+                    .then(R.uniqBy(R.prop('id')))
+                    .then(R.map(item => ({ ...item, status: 'active' })))
+                    .then(list => ds.api.transactions.parseTx(list, false))
+                    .then(list => list.map(this._pipeTransaction()));
             }
 
             /**
@@ -94,18 +99,15 @@
                     .then(([utxTxList, txList]) => utxTxList.concat(txList));
             }
 
-            createTransaction(transactionType, txData) {
+            createTransaction(txData) {
 
                 const tx = {
-                    transactionType,
                     sender: user.address,
                     timestamp: Date.now(),
                     ...txData
                 };
 
-                tx.type = Transactions._getTypeByName(transactionType);
-
-                if (transactionType === WavesApp.TRANSACTION_TYPES.NODE.MASS_TRANSFER) {
+                if (tx.type === SIGN_TYPE.MASS_TRANSFER) {
                     tx.totalAmount = tx.totalAmount || tx.transfers.map(({ amount }) => amount)
                         .reduce((result, item) => result.add(item));
                 }
@@ -121,7 +123,7 @@
                 return (tx) => {
 
                     tx.timestamp = new Date(tx.timestamp);
-                    tx.typeName = Transactions._getTransactionType(tx);
+                    tx.typeName = utils.getTransactionTypeName(tx);
                     tx.templateType = Transactions._getTemplateType(tx);
                     tx.shownAddress = Transactions._getTransactionAddress(tx);
 
@@ -155,41 +157,6 @@
                 };
             }
 
-            /**
-             * @param {object} tx
-             * @param {string} tx.transactionType
-             * @param {string} tx.sender
-             * @param {string} tx.recipient
-             * @param {object} tx.buyOrder
-             * @param {object} tx.sellOrder
-             * @return {string}
-             * @private
-             */
-            static _getTransactionType(tx) {
-                switch (tx.type) {
-                    case 4:
-                        return Transactions._getTransferType(tx);
-                    case 11:
-                        return Transactions._getMassTransferType(tx.sender);
-                    case 7:
-                        return Transactions._getExchangeType(tx);
-                    case 8:
-                        return Transactions._getLeaseType(tx);
-                    case 9:
-                        return TYPES.CANCEL_LEASING;
-                    case 10:
-                        return TYPES.CREATE_ALIAS;
-                    case 3:
-                        return TYPES.ISSUE;
-                    case 5:
-                        return TYPES.REISSUE;
-                    case 6:
-                        return TYPES.BURN;
-                    default:
-                        return TYPES.UNKNOWN;
-                }
-            }
-
             static _getTypeByName(txTypeName) {
                 switch (txTypeName) {
                     case WavesApp.TRANSACTION_TYPES.NODE.TRANSFER:
@@ -208,49 +175,14 @@
                         return 6;
                     case WavesApp.TRANSACTION_TYPES.NODE.CREATE_ALIAS:
                         return 10;
+                    case WavesApp.TRANSACTION_TYPES.NODE.DATA:
+                        return 12;
+                    case WavesApp.TRANSACTION_TYPES.NODE.SET_SCRIPT:
+                        return 13;
+                    case WavesApp.TRANSACTION_TYPES.NODE.SPONSORSHIP:
+                        return 14;
                     default:
                         throw new Error('Wrong tx name!');
-                }
-            }
-
-            /**
-             * @param {string} sender
-             * @param {string} recipient
-             * @return {string}
-             * @private
-             */
-            static _getTransferType({ sender, recipient }) {
-                const aliasList = ds.dataManager.getLastAliases();
-                if (sender === recipient || (sender === user.address && aliasList.indexOf(recipient) !== -1)) {
-                    return TYPES.CIRCULAR;
-                } else {
-                    return sender === user.address ? TYPES.SEND : TYPES.RECEIVE;
-                }
-            }
-
-            static _getMassTransferType(sender) {
-                return sender === user.address ? TYPES.MASS_SEND : TYPES.MASS_RECEIVE;
-            }
-
-            /**
-             * @param {string} sender
-             * @return {string}
-             * @private
-             */
-            static _getLeaseType({ sender }) {
-                return sender === user.address ? TYPES.LEASE_OUT : TYPES.LEASE_IN;
-            }
-
-            /**
-             * @param {object} tx
-             * @return {string}
-             * @private
-             */
-            static _getExchangeType({ buyOrder }) {
-                if (buyOrder.senderPublicKey === user.publicKey) {
-                    return TYPES.EXCHANGE_BUY;
-                } else {
-                    return TYPES.EXCHANGE_SELL;
                 }
             }
 
@@ -277,6 +209,13 @@
                     case TYPES.EXCHANGE_BUY:
                     case TYPES.EXCHANGE_SELL:
                         return 'exchange';
+                    case TYPES.DATA:
+                        return 'data';
+                    case TYPES.SPONSORSHIP_START:
+                    case TYPES.SPONSORSHIP_STOP:
+                        return 'sponsorship';
+                    case TYPES.SPONSORSHIP_FEE:
+                        return 'sponsorship_fee';
                     case TYPES.UNKNOWN:
                         return 'unknown';
                     default:
@@ -300,6 +239,7 @@
                     case TYPES.REISSUE:
                     case TYPES.LEASE_IN:
                     case TYPES.CREATE_ALIAS:
+                    case TYPES.SPONSORSHIP_FEE:
                         return sender;
                     default:
                         return recipient;

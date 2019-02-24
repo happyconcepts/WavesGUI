@@ -10,14 +10,21 @@
      * @param {$location} $location
      * @param {User} user
      * @param {$rootScope.Scope} $scope
+     * @param {IPollCreate} createPoll
+     * @param {Waves} waves
      * @return {DexCtrl}
      */
-    const controller = function (Base, $element, $state, $location, user, $scope) {
+    const controller = function (Base, $element, $state, $location, user, $scope, createPoll, waves) {
 
         class DexCtrl extends Base {
 
+            /**
+             * @type {string}
+             */
+            _titleTxt;
+
             constructor() {
-                super();
+                super($scope);
                 /**
                  * @type {boolean}
                  */
@@ -54,13 +61,29 @@
                     this.tab = 'tradeHistory';
                 }
 
-                this.observe('_assetIdPair', this._onChangePair);
-                this.observe(['_leftHidden', '_rightHidden'], this._onChangeProperty);
+                const matcherSign = () => {
+                    return user.address ? user.addMatcherSign() : Promise.resolve();
+                };
 
-                this._initializePair().then(() => {
-                    this.ready = true;
-                    $scope.$apply();
-                });
+                matcherSign()
+                    .catch(() => Promise.resolve())
+                    .then(() => {
+                        this._initializePair().then(() => {
+                            this.ready = true;
+                            $scope.$apply();
+                        });
+                    });
+
+                createPoll(this, this._getLastPrice, '_titleTxt', 1000);
+
+                this.observe('_assetIdPair', this._onChangePair);
+                this.observe('_titleTxt', this._setTitle);
+                this.observe(['_leftHidden', '_rightHidden'], this._onChangeProperty);
+            }
+
+            $onDestroy() {
+                super.$onDestroy();
+                window.document.title = 'Waves Client';
             }
 
             // hide and show graph to force its resize
@@ -68,12 +91,31 @@
                 this[`_${column}Hidden`] = !this[`_${column}Hidden`];
             }
 
+            /**
+             * @private
+             */
             async _onChangePair() {
                 const pair = await this._getPair();
                 $location.search('assetId2', pair.amountAsset.id);
                 $location.search('assetId1', pair.priceAsset.id);
             }
 
+            /**
+             * @return {Promise}
+             * @private
+             */
+            _getLastPrice() {
+                return this._getPair().then(pair => {
+                    return waves.matcher.getLastPrice(pair).then(data => (
+                        `${data.price.toFormat()} | ${pair.amountAsset.displayName}/${pair.priceAsset.displayName}`
+                    ));
+                });
+            }
+
+            /**
+             * @return {Promise}
+             * @private
+             */
             _initializePair() {
                 return new Promise((resolve) => {
                     setTimeout(() => {
@@ -118,6 +160,9 @@
                 }
             }
 
+            /**
+             * @private
+             */
             _getPairFromState() {
                 if (!($state.params.assetId1 && $state.params.assetId2)) {
                     return null;
@@ -138,13 +183,20 @@
                 setTimeout(() => $graphWrapper.show(), 100);
             }
 
+            /**
+             * @private
+             */
+            _setTitle() {
+                window.document.title = this._titleTxt;
+            }
+
         }
 
         return new DexCtrl();
     };
 
 
-    controller.$inject = ['Base', '$element', '$state', '$location', 'user', '$scope'];
+    controller.$inject = ['Base', '$element', '$state', '$location', 'user', '$scope', 'createPoll', 'waves'];
 
     angular.module('app.dex')
         .controller('DexCtrl', controller);

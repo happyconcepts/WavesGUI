@@ -2,6 +2,8 @@
     'use strict';
 
     const entities = require('@waves/data-entities');
+    const { SIGN_TYPE } = require('@waves/signature-adapter');
+    const ds = require('data-service');
 
     /**
      * @param Base
@@ -12,6 +14,10 @@
      * @param {app.utils} utils
      * @param {$rootScope.Scope} $scope
      * @param {DexDataService} dexDataService
+     * @param {ModalManager} modalManager
+     * @param {PermissionManager} permissionManager,
+     * @param {Ease} ease
+     * @param {JQuery} $element
      * @return {DexMyOrders}
      */
     const controller = function (
@@ -22,7 +28,11 @@
         notification,
         utils,
         $scope,
-        dexDataService
+        dexDataService,
+        modalManager,
+        permissionManager,
+        ease,
+        $element
     ) {
 
         const R = require('ramda');
@@ -140,139 +150,6 @@
                 }
             }
 
-            /**
-             * @param {IOrder} order
-             */
-            setPair(order) {
-                user.setSetting('dex.assetIdPair', {
-                    amount: order.assetPair.amountAsset.id,
-                    price: order.assetPair.priceAsset.id
-                });
-            }
-
-            showDetails(order) {
-                this.shownOrderDetails[order.id] = true;
-            }
-
-            hideDetails(order) {
-                this.shownOrderDetails[order.id] = false;
-            }
-
-            toggleDetails(order) {
-                this.shownOrderDetails[order.id] = !this.shownOrderDetails[order.id];
-            }
-
-            cancelAllOrders() {
-                this.orders.filter(tsUtils.contains({ isActive: true })).forEach((order) => {
-                    this.dropOrder(order);
-                });
-            }
-
-            round(data) {
-                return Math.round(Number(data));
-            }
-
-            /**
-             * @param {IOrder} order
-             * @return boolean
-             */
-            isSelected(order) {
-                return this._assetIdPair.amount === order.amount.asset.id &&
-                    this._assetIdPair.price === order.price.asset.id;
-            }
-
-            /**
-             * @param order
-             */
-            dropOrder(order) {
-                return ds.cancelOrder(order.amount.asset.id, order.price.asset.id, order.id)
-                    .then(() => {
-                        const canceledOrder = tsUtils.find(this.orders, { id: order.id });
-                        canceledOrder.state = 'Canceled';
-                        notification.info({
-                            ns: 'app.dex',
-                            title: { literal: 'directives.myOrders.notifications.isCanceled' }
-                        });
-
-                        if (this.poll) {
-                            this.poll.restart();
-                        }
-                    })
-                    .catch(() => {
-                        notification.error({
-                            ns: 'app.dex',
-                            title: { literal: 'directives.myOrders.notifications.somethingWentWrong' }
-                        });
-                    });
-            }
-
-            /**
-             * @returns {Promise}
-             * @private
-             */
-            _getOrders() {
-                return this._getAllOrders()
-                    .then((orders) => {
-                        const remap = R.map(DexMyOrders._remapOrders);
-
-                        orders.sort(utils.comparators.process(a => a.timestamp).desc);
-                        const result = remap(orders);
-                        const last = result.length ? result[result.length - 1] : null;
-
-                        if (!last) {
-                            return result;
-                        }
-
-                        return ds.api.transactions.getExchangeTxList({
-                            sender: user.address,
-                            timeStart: ds.utils.normalizeTime(last.timestamp.getTime())
-                        }).then((txList) => {
-                            const transactionsByOrderHash = DexMyOrders._getTransactionsByOrderIdHash(txList);
-                            this.loadingError = false;
-                            return result.map((order) => {
-                                if (!transactionsByOrderHash[order.id]) {
-                                    transactionsByOrderHash[order.id] = [];
-                                }
-                                if (transactionsByOrderHash[order.id].length) {
-                                    order.fee = transactionsByOrderHash[order.id]
-                                        .map(DexMyOrders._getFeeByType(order.type))
-                                        .reduce((sum, fee) => sum.add(fee));
-                                }
-                                order.exchange = transactionsByOrderHash[order.id];
-                                return order;
-                            });
-                        });
-                    })
-                    .catch(() => {
-                        this.loadingError = true;
-                        $scope.$apply();
-                    });
-            }
-
-            _getAllOrders() {
-                return Promise.all([
-                    waves.matcher.getOrders().then(R.filter(R.whereEq({ isActive: true }))),
-                    ds.api.pairs.get(this._assetIdPair.amount, this._assetIdPair.price)
-                ])
-                    .then(([list, pair]) => {
-                        if (list.length === 100) {
-                            const hash = utils.toHash(list, 'id');
-                            return ds.api.matcher.getOrdersByPair(pair)
-                                .then((pairList) => {
-                                    const newList = pairList.filter((order) => {
-                                        return order.isActive &&
-                                            order.assetPair.amountAsset.id === pair.amountAsset.id &&
-                                            order.assetPair.priceAsset.id === pair.priceAsset.id &&
-                                            !hash[order.id];
-                                    });
-                                    return list.concat(newList);
-                                });
-                        } else {
-                            return list;
-                        }
-                    });
-            }
-
             static _getTransactionsByOrderIdHash(txList) {
                 const uniqueList = R.uniqBy(R.prop('id'), txList);
                 const transactionsByOrderHash = Object.create(null);
@@ -301,12 +178,15 @@
              * @param {IOrder} order
              * @private
              */
-            static _remapOrders(order) {
-                const assetPair = order.assetPair;
-                const pair = `${assetPair.amountAsset.displayName} / ${assetPair.priceAsset.displayName}`;
-                const isNew = Date.now() < (order.timestamp.getTime() + 1000 * 8);
-                const percent = new BigNumber(order.progress * 100).dp(2).toFixed();
-                return { ...order, isNew, percent, pair };
+            static _remapOrders(matcherPublicKey) {
+                return order => {
+                    const assetPair = order.assetPair;
+                    const pair = `${assetPair.amountAsset.displayName} / ${assetPair.priceAsset.displayName}`;
+                    const isNew = Date.now() < (order.timestamp.getTime() + 1000 * 8);
+                    const percent = new BigNumber(order.progress * 100).dp(2).toFixed();
+                    return waves.matcher.getCreateOrderFee({ ...order, matcherPublicKey })
+                        .then(fee => ({ ...order, isNew, percent, pair, fee }));
+                };
             }
 
             static _getFeeByType(type) {
@@ -322,6 +202,174 @@
                 };
             }
 
+            /**
+             * @param {IOrder} order
+             */
+            setPair(order) {
+                user.setSetting('dex.assetIdPair', {
+                    amount: order.assetPair.amountAsset.id,
+                    price: order.assetPair.priceAsset.id
+                });
+            }
+
+            showDetails(order) {
+                this.shownOrderDetails[order.id] = true;
+            }
+
+            hideDetails(order) {
+                this.shownOrderDetails[order.id] = false;
+            }
+
+            toggleDetails(order) {
+                this.shownOrderDetails[order.id] = !this.shownOrderDetails[order.id];
+            }
+
+            cancelAllOrders() {
+                if (!permissionManager.isPermitted('CAN_CANCEL_ORDER')) {
+                    const $notify = $element.find('.js-order-notification');
+                    DexMyOrders._animateNotification($notify);
+                    return null;
+                }
+
+                this.orders.filter(tsUtils.contains({ isActive: true })).forEach((order) => {
+                    this.dropOrder(order);
+                });
+            }
+
+            round(data) {
+                return Math.round(Number(data));
+            }
+
+            /**
+             * @param {IOrder} order
+             * @return boolean
+             */
+            isSelected(order) {
+                return this._assetIdPair.amount === order.amount.asset.id &&
+                    this._assetIdPair.price === order.price.asset.id;
+            }
+
+            dropOrderGetSignData(order) {
+                const { id } = order;
+                const data = { id };
+                const signable = ds.signature.getSignatureApi().makeSignable({
+                    type: SIGN_TYPE.CANCEL_ORDER,
+                    data
+                });
+
+                return utils.signMatcher(signable)
+                    .then(signable => signable.getDataForApi());
+            }
+
+            /**
+             * @param order
+             */
+            dropOrder(order) {
+
+                if (!permissionManager.isPermitted('CAN_CANCEL_ORDER')) {
+                    const $notify = $element.find('.js-order-notification');
+                    DexMyOrders._animateNotification($notify);
+                    return null;
+                }
+
+                const dataPromise = this.dropOrderGetSignData(order);
+
+                dataPromise
+                    .then((signedTxData) => ds.cancelOrder(signedTxData, order.amount.asset.id, order.price.asset.id))
+                    .then(() => {
+                        const canceledOrder = tsUtils.find(this.orders, { id: order.id });
+                        canceledOrder.state = 'Canceled';
+                        notification.info({
+                            ns: 'app.dex',
+                            title: { literal: 'directives.myOrders.notifications.isCanceled' }
+                        });
+
+                        if (this.poll) {
+                            this.poll.restart();
+                        }
+                    })
+                    .catch(e => {
+                        const error = utils.parseError(e);
+                        notification.error({
+                            ns: 'app.dex',
+                            title: { literal: 'directives.myOrders.notifications.somethingWentWrong' },
+                            body: { literal: error && error.message || error }
+                        });
+                    });
+            }
+
+            /**
+             * @returns {Promise}
+             * @private
+             */
+            _getOrders() {
+                return Promise.all([
+                    this._getAllOrders(),
+                    ds.fetch(ds.config.get('matcher'))
+                ])
+                    .then(([orders, matcherPublicKey]) => {
+                        const remap = R.map(DexMyOrders._remapOrders(matcherPublicKey));
+
+                        orders.sort(utils.comparators.process(a => a.timestamp).desc);
+                        return Promise.all(remap(orders));
+                    })
+                    .then(result => {
+                        const last = result.length ? result[result.length - 1] : null;
+
+                        if (!last) {
+                            return result;
+                        }
+
+                        return ds.api.transactions.getExchangeTxList({
+                            sender: user.address,
+                            timeStart: ds.utils.normalizeTime(last.timestamp.getTime())
+                        }).then((txList) => {
+                            const transactionsByOrderHash = DexMyOrders._getTransactionsByOrderIdHash(txList);
+                            this.loadingError = false;
+                            return result.map((order) => {
+                                if (!transactionsByOrderHash[order.id]) {
+                                    transactionsByOrderHash[order.id] = [];
+                                }
+                                // if (transactionsByOrderHash[order.id].length) {
+                                //     order.fee = transactionsByOrderHash[order.id]
+                                //         .map(DexMyOrders._getFeeByType(order.type))
+                                //         .reduce((sum, fee) => sum.add(fee));
+                                // }
+                                order.exchange = transactionsByOrderHash[order.id];
+                                return order;
+                            });
+                        }).catch(() => result);
+                    })
+                    .catch(() => {
+                        this.loadingError = true;
+                        $scope.$apply();
+                    });
+            }
+
+            _getAllOrders() {
+                return waves.matcher.getOrders().then(R.filter(R.whereEq({ isActive: true })));
+            }
+
+            static _animateNotification($element) {
+                return utils.animate($element, { t: 100 }, {
+                    duration: 1200,
+                    step: function (tween) {
+                        const progress = ease.bounceOut(tween / 100);
+                        $element.css('transform', `translate(0, ${-100 + progress * 100}%)`);
+                    }
+                })
+                    .then(() => utils.wait(700))
+                    .then(() => {
+                        return utils.animate($element, { t: 0 }, {
+                            duration: 500,
+                            step: function (tween) {
+                                const progress = ease.linear(tween / 100);
+                                $element.css('transform', `translate(0, ${(-((1 - progress) * 100))}%)`);
+                            }
+                        });
+                    });
+            }
+
         }
 
         return new DexMyOrders();
@@ -335,7 +383,11 @@
         'notification',
         'utils',
         '$scope',
-        'dexDataService'
+        'dexDataService',
+        'modalManager',
+        'permissionManager',
+        'ease',
+        '$element'
     ];
 
     angular.module('app.dex').component('wDexMyOrders', {

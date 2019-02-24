@@ -10,14 +10,14 @@
             dataset: ORDERS_TYPES.asks,
             key: 'amount',
             label: 'Asks',
-            color: '#e5494d', // stakan krasn
+            color: '#e5494d',
             type: ['line', 'area']
         },
         bids: {
             dataset: ORDERS_TYPES.bids,
             key: 'amount',
             label: 'Bids',
-            color: '#5a81ea', // stakan goluboi
+            color: '#5a81ea',
             type: ['line', 'area']
         }
     };
@@ -133,17 +133,19 @@
             }
 
             _getOrderBook() {
-                return (
-                    waves.matcher
-                        .getOrderBook(this._assetIdPair.amount, this._assetIdPair.price)
-                        .then((orderBook) => this._cutOffOutlyingOrdersIfNecessary(orderBook))
-                        .then(TradeGraph._buildCumulativeOrderBook)
-                        .catch(() => {
-                            this.loadingError = true;
-                            this.pending = false;
-                            $scope.$apply();
-                        })
-                );
+                return (waves.matcher
+                    .getOrderBook(this._assetIdPair.amount, this._assetIdPair.price)
+                    .then((orderBook) => this._cutOffOutlyingOrdersIfNecessary(orderBook))
+                    .then(TradeGraph._buildCumulativeOrderBook)
+                    .then(data => {
+                        this.loadingError = false;
+                        return data;
+                    })
+                    .catch(() => {
+                        this.loadingError = true;
+                        this.pending = false;
+                        $scope.$apply();
+                    }));
             }
 
             _setOrderBook(orderBook) {

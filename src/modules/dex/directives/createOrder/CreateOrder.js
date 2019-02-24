@@ -111,7 +111,8 @@
                  */
                 this.focusedInputName = null;
                 /**
-                 * @type {[]}
+                 *
+                 * @type {boolean}
                  */
                 this.expirationValues = [
                     { name: '5min', value: () => utils.moment().add().minute(5).getDate().getTime() },
@@ -119,21 +120,10 @@
                     { name: '1hour', value: () => utils.moment().add().hour(1).getDate().getTime() },
                     { name: '1day', value: () => utils.moment().add().day(1).getDate().getTime() },
                     { name: '1week', value: () => utils.moment().add().week(1).getDate().getTime() },
-                    {
-                        name: '30day',
-                        value: () => utils.moment()
-                            .add().day(29)
-                            .add().hour(23)
-                            .add().minute(55).getDate().getTime()
-                    }
+                    { name: '30day', value: () => utils.moment().add().day(29).getDate().getTime() }
                 ];
 
                 this.expiration = this.expirationValues[this.expirationValues.length - 1].value;
-
-                ds.moneyFromTokens('0.003', WavesApp.defaultAssets.WAVES).then((money) => {
-                    this.fee = money;
-                    $scope.$digest();
-                });
 
                 this.receive(dexDataService.chooseOrderBook, ({ type, price, amount }) => {
                     this.expand(type);
@@ -174,6 +164,19 @@
                     });
                 });
 
+                const currentFee = () => Promise.all([
+                    waves.node.assets.getAsset(this._assetIdPair.amount),
+                    waves.node.assets.getAsset(this._assetIdPair.price),
+                    ds.fetch(ds.config.get('matcher'))
+                ]).then(([amount, price, matcherPublicKey]) => waves.matcher.getCreateOrderFee({
+                    amount: new entities.Money(0, amount),
+                    price: new entities.Money(0, price),
+                    matcherPublicKey
+                })).then(fee => {
+                    this.fee = fee;
+                    $scope.$apply();
+                });
+
                 Promise.all([
                     balancesPoll.ready,
                     lastTradePromise,
@@ -209,9 +212,10 @@
                             $scope.$apply();
                         }
                     }));
+                    currentFee();
                 });
 
-                this.observe(['priceBalance', 'totalPrice'], this._setIfCanBuyOrder);
+                this.observe(['priceBalance', 'totalPrice', 'maxPriceBalance'], this._setIfCanBuyOrder);
 
                 this.observe(['amount', 'price', 'type'], this._currentTotal);
                 this.observe('totalPrice', this._currentAmount);
@@ -220,6 +224,8 @@
                 $element.on('mousedown touchstart', '.body', (e) => {
                     e.stopPropagation();
                 });
+
+                currentFee();
             }
 
             expand(type) {
@@ -299,40 +305,92 @@
                 const notify = $element.find('.js-order-notification');
                 notify.removeClass('success').removeClass('error');
 
-                return ds.orderPriceFromTokens(
-                    this.price.getTokens(),
-                    this._assetIdPair.amount,
-                    this._assetIdPair.price
-                )
-                    .then((price) => {
-                        const amount = this.amount;
+                return ds.fetch(ds.config.get('matcher'))
+                    .then((matcherPublicKey) => {
                         form.$setUntouched();
                         $scope.$apply();
-                        return ds.createOrder({
-                            amountAsset: this.amountBalance.asset.id,
-                            priceAsset: this.priceBalance.asset.id,
+
+                        const data = {
                             orderType: this.type,
-                            price: price.toMatcherCoins(),
-                            amount: amount.toCoins(),
-                            matcherFee: this.fee.getCoins(),
-                            expiration: this.expiration()
-                        });
-                    }).then(() => {
-                        notify.addClass('success');
-                        this.createOrderFailed = false;
-                        const pair = `${this.amountBalance.asset.id}/${this.priceBalance.asset.id}`;
-                        analytics.push('DEX', `DEX.${WavesApp.type}.Order.${this.type}.Success`, pair);
-                        dexDataService.createOrder.dispatch();
-                    }).catch(() => {
-                        this.createOrderFailed = true;
-                        notify.addClass('error');
-                        const pair = `${this.amountBalance.asset.id}/${this.priceBalance.asset.id}`;
-                        analytics.push('DEX', `DEX.${WavesApp.type}.Order.${this.type}.Error`, pair);
-                    }).finally(() => {
-                        CreateOrder._animateNotification(notify);
+                            price: this.price,
+                            amount: this.amount,
+                            matcherFee: this.fee,
+                            matcherPublicKey
+                        };
+
+                        this._checkOrder(data)
+                            .then(() => this._sendOrder(data))
+                            .then(data => {
+
+                                if (!data) {
+                                    return null;
+                                }
+
+                                notify.addClass('success');
+                                this.createOrderFailed = false;
+                                const pair = `${this.amountBalance.asset.id}/${this.priceBalance.asset.id}`;
+                                analytics.push('DEX', `DEX.${WavesApp.type}.Order.${this.type}.Success`, pair);
+                                dexDataService.createOrder.dispatch();
+                                CreateOrder._animateNotification(notify);
+                            })
+                            .catch(() => {
+                                this.createOrderFailed = true;
+                                notify.addClass('error');
+                                const pair = `${this.amountBalance.asset.id}/${this.priceBalance.asset.id}`;
+                                analytics.push('DEX', `DEX.${WavesApp.type}.Order.${this.type}.Error`, pair);
+                                CreateOrder._animateNotification(notify);
+                            });
                     });
             }
 
+            /**
+             * @param data
+             * @return {*|Promise}
+             * @private
+             */
+            _sendOrder(data) {
+                const expiration = ds.utils.normalizeTime(this.expiration());
+                const clone = { ...data, expiration };
+
+                return utils.createOrder(clone);
+            }
+
+            /**
+             * @param orderData
+             * @private
+             */
+            _checkOrder(orderData) {
+                const isBuy = orderData.orderType === 'buy';
+                const factor = isBuy ? 1 : -1;
+                const limit = 1 + factor * (Number(user.getSetting('orderLimit')) || 0);
+                const price = (new BigNumber(isBuy ? this.ask.price : this.bid.price)).times(limit);
+                const orderPrice = orderData.price.getTokens();
+
+                if (price.isNaN() || price.eq(0)) {
+                    return Promise.resolve();
+                }
+
+                /**
+                 * @type {BigNumber}
+                 */
+                const delta = isBuy ? orderPrice.minus(price) : price.minus(orderPrice);
+
+                if (delta.isNegative()) {
+                    return Promise.resolve();
+                }
+
+                return modalManager.showConfirmOrder({
+                    ...orderData,
+                    orderLimit: Number(user.getSetting('orderLimit')) * 100
+                }).catch(() => {
+                    throw new Error('You have cancelled the creation of this order');
+                });
+            }
+
+            /**
+             * @return {Promise<T | never>}
+             * @private
+             */
             _showDemoModal() {
                 return modalManager.showDialogModal({
                     iconClass: 'open-main-dex-account-info',
@@ -540,9 +598,11 @@
                     this.priceBalance &&
                     this.totalPrice.asset.id === this.priceBalance.asset.id) {
 
-                    this.canBuyOrder = (
-                        this.totalPrice.lte(this.maxPriceBalance) && this.maxPriceBalance.getTokens().gt(0)
-                    );
+                    if (this.maxPriceBalance) {
+                        this.canBuyOrder = (
+                            this.totalPrice.lte(this.maxPriceBalance) && this.maxPriceBalance.getTokens().gt(0)
+                        );
+                    }
                 } else {
                     this.canBuyOrder = true;
                 }

@@ -8,13 +8,30 @@
 @mobile-settings-item-height: 50px;
 
 md-dialog.settings-modal {
+  height: 100%;
   width: 100%;
   max-width: 740px;
   min-width: 740px;
   color: @color-disabled-900;
+  overflow: hidden;
+  @media screen and(min-width: 541px) {
+    max-height: 540px;
+  }
 
-  md-dialog-content::after {
-    display: none;
+  md-dialog-content {
+    padding: 0;
+    height: 100%;
+    @media screen and(min-width: 768px) {
+      min-height: 460px;
+    }
+
+    &::after {
+      display: none;
+    }
+  }
+
+  w-web-only {
+    display: block;
   }
 
   w-select {
@@ -32,11 +49,9 @@ md-dialog.settings-modal {
 
   w-responsive-menu {
     width: 199px;
-    height: calc(100% ~' + 30px');
-    position: absolute;
+    height: 100%;
+    position: fixed;
     font-size: 15px;
-    left: -40px;
-    top: -30px;
     border-right: 1px solid @color-disabled-200;
 
     w-responsive-menu-item {
@@ -113,17 +128,37 @@ md-dialog.settings-modal {
   }
 
   .modal-content {
+    height: 100%;
     display: flex;
     flex-direction: row;
     flex-shrink: 0;
     position: relative;
-    min-height: 390px;
+    min-height: 380px;
 
     .settings-content {
       position: relative;
       margin-left: 200px;
       right: 0;
+      padding: 30px 40px 40px;
       width: 100%;
+
+      .info {
+        margin-top: -1px;
+        display: block;
+
+        .row-style:first-child {
+          margin-top: -7px;
+        }
+
+        span.waves-logo {
+          width: 60px;
+          height: 13px;
+          display: inline-block;
+          margin: 3px 0 0;
+          padding: 0;
+          background-size: contain;
+        }
+      }
 
       .label {
         line-height: 1.8em;
@@ -140,46 +175,37 @@ md-dialog.settings-modal {
     display: flex;
     justify-content: space-between;
     width: 100%;
-    align-items: center;
+
+    &.unit-checkbox {
+      min-height: auto;
+    }
+
+    &:not(.unit-checkbox) {
+      align-items: center;
+    }
+  }
+
+  .row {
+    min-height: 44px;
   }
 
   .row-style {
-    padding: 12px 0;
     border-bottom: 1px dashed @color-basic-200;
 
-    &:last-child {
-      border-bottom-style: solid;
-      align-items: center;
+    &.solid-border {
+      border-bottom: 1px solid @color-basic-200;
     }
 
-    &.unit-checkbox {
-      // TODO : make it work properly without magic
-      padding-top: 5px;
-
-      w-checkbox-submit {
-        flex-grow: 0;
-        display: block;
-        margin-right: 18px;
-        padding-right: 18px;
-        align-self: flex-start;
-      }
-
-      label {
-        flex-grow: 1;
-      }
-    }
-
-    &.unit-select {
-      // TODO : align to the middle without magic
-      padding: 5px 0;
+    &.no-border {
+      border: 0 none;
     }
   }
 
-  .white,
-  .dark,
-  .auto,
-  .blue,
-  .green {
+  .white-dot,
+  .dark-dot,
+  .auto-dot,
+  .blue-dot,
+  .green-dot {
     display: inline-block;
     vertical-align: middle;
     border-radius: 50%;
@@ -192,49 +218,32 @@ md-dialog.settings-modal {
     margin-top: -2px;
   }
 
-  .white {
+  .white-dot {
     background: white;
     border: 1px solid @color-basic-200;
   }
 
-  .dark {
+  .dark-dot {
     background: #2d2d2d; //basic-900
     border: 1px solid @color-disabled-200;
   }
 
-  .auto {
+  .auto-dot {
     background: url(/img/icons/mode-toggler-auto.svg) center no-repeat;
   }
 
-  .blue {
+  .blue-dot {
     background: #1f5af6; //submit-400
   }
 
-  .green {
+  .green-dot {
     background: #4aad02; //success-400
   }
-
-
 
   .network {
     .row-style {
       border-bottom: 0 none;
       padding: 0;
-    }
-  }
-
-  .info {
-    .row-style:first-child  {
-      padding-top: 3px;
-    }
-
-    span.waves-logo {
-      width: 60px;
-      height: 13px;
-      display: inline-block;
-      margin: 3px 0 0;
-      padding: 0;
-      background-size: contain;
     }
   }
 
@@ -255,7 +264,54 @@ md-dialog.settings-modal {
     border-radius: 4px;
     border: 1px dashed @color-basic-200;
     padding: 0 15px;
-    overflow: auto;
+
+    &:not(.has-helper) {
+      overflow: auto;
+    }
+
+    &.has-helper {
+      z-index: 1;
+    }
+
+    .data-provider-info {
+      align-items: center;
+      max-height: 110px;
+      overflow: auto;
+      margin: 5px -10px 7px 0;
+      padding-right: 7px;
+    }
+
+    .data-provider-name,
+    .data-provider-id {
+      max-width: 210px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .data-provider-name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .data-provider-id {
+      font-size: 9px;
+    }
+
+    .help-icon__content {
+      width: 270px;
+      left: auto;
+      right: -39px;
+      margin-top: 6px;
+
+      .avatar-icon {
+        img {
+          width: 30px;
+          height: 30px;
+          border-radius: 50%;
+        }
+      }
+    }
 
     pre {
       display: block;
@@ -266,18 +322,119 @@ md-dialog.settings-modal {
       top: 0;
     }
 
-    input {
-      border-radius: @border-radius;
-      padding: 0 @padding-main-layout;
-      background: @color-white;
-      color: @color-disabled-900;
-      height: 30px;
-      line-height: 30px;
+    form {
+      display: block;
       width: 100%;
-      border: 1px solid @color-basic-200;
+    }
+
+    .input-state {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      right: 6px;
+      top: 50%;
+      transform: translate(-50%, -50%);
+
+      w-help-icon {
+        display: block;
+        position: absolute;
+        left: 0;
+        top: 0;
+        .help-icon__icon {
+          margin:0;
+        }
+      }
+
+      &__icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        width: 16px;
+        height: 16px;
+        position: relative;
+        transition: .2s opacity;
+
+        svg.animate {
+          stroke-dasharray: 50;
+          stroke-dashoffset: 50;
+        }
+      }
+
+      &.pending {
+        w-help-icon {
+          display: none;
+        }
+
+        .input-state__icon {
+          border: 2px solid @color-basic-100;
+          border-right: 2px solid @color-submit-400;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          opacity: 1;
+          animation-duration: 1s;
+          animation-name: rotate;
+          animation-iteration-count: infinite;
+          animation-timing-function: linear;
+
+          @keyframes rotate {
+            from {
+              transform: rotate(0deg);
+            }
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        }
+      }
+
+      &.success {
+        w-help-icon {
+          display: none;
+        }
+
+        .input-state__icon {
+          opacity: 1;
+          box-shadow: 0 0 0 2px @color-basic-100 inset;
+          border-radius: 50%;
+
+          svg.animate {
+            stroke-dasharray: 50;
+            opacity: 1;
+            stroke-dashoffset: 0;
+            transition: all 3s ease-out 0s;
+          }
+        }
+      }
+    }
+
+    .w-input-wrap {
+      input {
+        border-radius: @border-radius;
+        padding: 0 @padding-main-layout;
+        background: @color-white;
+        color: @color-disabled-900;
+        height: 30px;
+        line-height: 30px;
+        width: 100%;
+        border: 1px solid @color-basic-200;
+      }
+
+      &.focused {
+        input {
+          border-color: @color-submit-400;
+        }
+      }
+
+      &.ng-invalid,
+      &.focused.ng-invalid {
+        input {
+          border-color: @color-error-200;
+        }
+      }
     }
   }
-
 }
 
 @media screen and (max-width: 767px) {
@@ -303,7 +460,7 @@ md-dialog.settings-modal {
       min-width: 360px;
       border-bottom: 1px solid @color-accent-50;
       left: 0;
-      top:81px;
+      top: 79px;
       position: fixed;
       margin: -20px -10px 0 -20px;
       border-right: 0 none;
@@ -349,7 +506,6 @@ md-dialog.settings-modal {
             height: @mobile-settings-item-height;
           }
         }
-
       }
 
       w-button {
@@ -392,23 +548,16 @@ md-dialog.settings-modal {
         .row-mobile {
           flex-direction: column;
           align-items: flex-start;
-        }
-
-        .step-list .info .flex-row:first-child {
-          padding-top: 3px;
+          padding: 4px 0;
         }
       }
-
     }
-
   }
 }
 
 @media screen and (max-width: 540px) {
-
   md-dialog.settings-modal {
     max-width: 100%;
     min-width: 100%;
   }
-
 }

@@ -36,7 +36,7 @@ w-dex-order-book {
       line-height: 23px;
       font-size: @font-size-caption-2;
 
-      &:hover {
+      &[data-price]:hover {
         background-color: @hover-default;
         border-color: @color-basic-200;
       }
@@ -47,7 +47,7 @@ w-dex-order-book {
     }
 
     w-thead {
-      color: @color-disabled-700;
+      color: @color-basic-600;
       border-bottom: 1px solid @color-disabled-100;
 
       w-row {
@@ -113,7 +113,30 @@ w-dex-order-book {
 
     .asks w-row,
     .bids w-row {
-      cursor: pointer;
+      position: relative;
+
+      &[data-price] {
+        cursor: pointer;
+      }
+
+      .tooltip-dex,
+      .tooltip-dex::before {
+        right: 50%;
+        transform: translate(50%,0);
+        color: @color-white;
+      }
+    }
+
+    .asks w-row {
+      .tooltip-bid {
+        display: none;
+      }
+    }
+
+    .bids w-row {
+      .tooltip-ask {
+        display: none;
+      }
     }
 
     .dex-layout {

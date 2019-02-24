@@ -2,25 +2,30 @@ import * as gulp from 'gulp';
 import * as concat from 'gulp-concat';
 import * as babel from 'gulp-babel';
 import { exec, execSync } from 'child_process';
-import { download, getFilesFrom, prepareExport, prepareHTML, run, task } from './ts-scripts/utils';
-import { basename, join, sep } from 'path';
-import { copy, mkdirp, outputFile, readdir, readFile, readJSON, readJSONSync, writeFile, writeJSON } from 'fs-extra';
+import { download, getAllLessFiles, getFilesFrom, prepareHTML, run, task } from './ts-scripts/utils';
+import { basename, extname, join, sep } from 'path';
+import {
+    copy,
+    outputFile,
+    outputFileSync,
+    readdir,
+    readFile,
+    readJSON,
+    readJSONSync,
+    writeFile,
+} from 'fs-extra';
 import { IMetaJSON, IPackageJSON, TBuild, TConnection, TPlatform } from './ts-scripts/interface';
 import * as templateCache from 'gulp-angular-templatecache';
 import * as htmlmin from 'gulp-htmlmin';
+import { readFileSync, writeFileSync } from 'fs';
+import { render } from 'less';
 
 const zip = require('gulp-zip');
-const s3 = require('gulp-s3');
 
 const { themes: THEMES } = readJSONSync(join(__dirname, 'src/themeConfig', 'theme.json'));
 const meta: IMetaJSON = readJSONSync(join(__dirname, 'ts-scripts', 'meta.json'));
 const pack: IPackageJSON = readJSONSync(join(__dirname, 'package.json'));
 const configurations = Object.keys(meta.configurations);
-const AWS = {
-    key: process.env.AWS_ACCESS_KEY_ID,
-    secret: process.env.AWS_SECRET_ACCESS_KEY,
-    region: 'eu-central-1'
-};
 
 const SOURCE_FILES = getFilesFrom(join(__dirname, 'src'), '.js');
 const IMAGE_LIST = getFilesFrom(join(__dirname, 'src', 'img'), ['.png', '.svg', '.jpg'], (name, path) => path.indexOf('no-preload') === -1);
@@ -103,11 +108,13 @@ const indexPromise = readFile(join(__dirname, 'src', 'index.hbs'), { encoding: '
                             forCopy.push(copy(path, join(targetPath, name)));
                         });
                         forCopy.push(copy(join(__dirname, 'electron', 'icons'), join(targetPath, 'img', 'icon.png')));
+                        forCopy.push(copy(join(__dirname, 'electron', 'waves.desktop'), join(targetPath, 'waves.desktop')));
+                        forCopy.push(copy(join(__dirname, 'node_modules', 'i18next', 'dist'), join(targetPath, 'i18next')));
                     }
 
                     Promise.all([
                         Promise.all(meta.copyNodeModules.map((path) => {
-                            return copy(join(__dirname, path), `${targetPath}/${path}`);
+                            return copy(join(__dirname, path), join(targetPath, path));
                         })) as Promise<any>,
                         copy(join(__dirname, 'src/img'), `${targetPath}/img`).then(() => {
                             const images = IMAGE_LIST.map((path) => path.replace(reg, ''));
@@ -138,30 +145,29 @@ const indexPromise = readFile(join(__dirname, 'src', 'index.hbs'), { encoding: '
                     });
                 }
 
-                Promise.all([indexPromise.then(() => {
+                indexPromise
+                    .then(() => {
 
-                    const styles = [{ name: join('/css', vendorCssName), theme: null }];
+                        const styles = [{ name: join('/css', vendorCssName), theme: null }];
 
-                    for (const theme of THEMES) {
-                        styles.push({
-                            name: join('/css', `${theme}-${cssName}`), theme
+                        for (const theme of THEMES) {
+                            styles.push({
+                                name: join('/css', `${theme}-${cssName}`), theme
+                            });
+                        }
+
+                        return prepareHTML({
+                            buildType: type,
+                            target: targetPath,
+                            connection: configName,
+                            scripts: scripts,
+                            type: buildName,
+                            styles,
+                            themes: THEMES
                         });
-                    }
-
-                    return prepareHTML({
-                        buildType: type,
-                        target: targetPath,
-                        connection: configName,
-                        scripts: scripts,
-                        type: buildName,
-                        styles,
-                        themes: THEMES
-                    });
-                }).then((file) => {
-                    outputFile(`${targetPath}/index.html`, file);
-                }),
-                    prepareExport().then(file => outputFile(`${targetPath}/export.html`, file))
-                ]).then(() => done());
+                    })
+                    .then((file) => outputFile(`${targetPath}/index.html`, file))
+                    .then(() => done());
             });
             taskHash.html.push(`html-${taskPostfix}`);
 
@@ -264,6 +270,8 @@ task('downloadLocales', ['concat-develop-sources'], function (done) {
             .map(str => str.replace('angular.module(\'', '')
                 .replace('\',', ''));
 
+        modules.push('electron');
+
         const load = name => {
             const langs = Object.keys(meta.langList);
 
@@ -276,7 +284,7 @@ task('downloadLocales', ['concat-develop-sources'], function (done) {
                     .catch(() => console.error(`Error load module with name ${name}!`));
             }));
         };
-        return Promise.all(modules.map(load))
+        return Promise.all(modules.map(load));
     }).then(() => done());
 });
 
@@ -289,9 +297,34 @@ task('eslint', function (done) {
 });
 
 task('less', function () {
+    const files = getAllLessFiles();
     for (const theme of THEMES) {
-        execSync(`sh ${join('scripts', `less.sh -t=${theme} -n=${cssName}`)}`);
-        steelSheetsFiles[cssName] = { theme };
+        outputFileSync(join(__dirname, 'tmp', theme), '');
+        let bigFile = '';
+        let promise = Promise.resolve();
+
+        for (const file of files) {
+            let readFile = readFileSync(file).toString();
+
+            promise = promise.then(() => {
+                return (render as any)(readFile, {
+                    filename: join(file),
+                    paths: join(__dirname, `src/themeConfig/${theme}`)
+                } as any)
+                    .then(function (output) {
+                            bigFile = bigFile + output.css;
+                        },
+                        function (error) {
+                            console.log(error);
+                        });
+            });
+        }
+
+        promise.then(() => {
+            outputFileSync(join(__dirname, 'tmp', `${theme}`), bigFile);
+            execSync(`sh ${join(__dirname, 'scripts', `less.sh -t=${theme} -n=${cssName}`)}`);
+            steelSheetsFiles[cssName] = { theme };
+        });
     }
 });
 
@@ -306,7 +339,10 @@ task('babel', ['concat-develop'], function () {
                 'transform-object-rest-spread'
             ]
         }))
-        .pipe(gulp.dest(tmpJsPath));
+        .pipe(gulp.dest(tmpJsPath))
+        .on('end', () => {
+            writeFileSync(bundlePath, `(function () {${readFileSync(bundlePath, 'utf8')}})()`);
+        });
 });
 
 task('uglify', ['babel', 'templates'], function (done) {
@@ -332,20 +368,6 @@ task('uglify', ['babel', 'templates'], function (done) {
     ]).then(() => done());
 });
 
-task('s3-testnet', function () {
-    const bucket = 'testnet.waveswallet.io';
-    return gulp.src('./dist/testnet/**/*')
-        .pipe(s3({ ...AWS, bucket }));
-});
-
-task('s3-mainnet', function () {
-    const bucket = 'waveswallet.io';
-    return gulp.src('./dist/mainnet/**/*')
-        .pipe(s3({ ...AWS, bucket }));
-});
-
-task('s3', ['s3-testnet', 's3-mainnet']);
-
 task('zip', configurations.map(name => `zip-${name}`));
 
 task('concat-develop', [
@@ -361,32 +383,53 @@ task('copy', taskHash.copy);
 task('html', taskHash.html);
 task('zip', taskHash.zip);
 
-task('electron-debug', ['electron-task-list'], function (done) {
-    const root = join(__dirname, 'dist', 'desktop');
+task('electron-debug', function (done) {
+    const root = join(__dirname, 'dist', 'desktop', 'electron-debug');
+    const srcDir = join(__dirname, 'electron');
 
-    const process = function (to: string) {
-        const promise = readdir(join(__dirname, 'electron'))
-            .then((list) => list.filter((name) => name.indexOf('js') !== -1))
-            .then((list) => list.map((name) => copy(join(__dirname, 'electron', name), join(to, name))))
-            .then((list) => Promise.all(list))
-            .then(() => readJSON(join(__dirname, 'dist', 'desktop', 'mainnet', 'normal', 'package.json')))
-            .then((pack) => {
-                pack.server = `localhost:8080`;
-                return writeFile(join(to, 'package.json'), JSON.stringify(pack, null, 4));
-            });
+    const copyItem = name => copy(join(srcDir, name), join(root, name));
+    const makePackageJSON = () => {
+        const targetPackage = Object.create(null);
 
-        return promise;
+        meta.electron.createPackageJSONFields.forEach((name) => {
+            targetPackage[name] = pack[name];
+        });
+
+        Object.assign(targetPackage, meta.electron.defaults);
+        targetPackage.server = 'localhost:8080';
+
+        return writeFile(join(root, 'package.json'), JSON.stringify(targetPackage));
     };
 
+    const excludeTypeScrip = list => list.filter(name => extname(name) !== '.ts');
+    const loadLocales = () => {
+        const list = Object.keys(require(join(__dirname, 'ts-scripts', 'meta.json')).langList);
 
-    const copyTo = join(root, 'electron-debug');
-    process(copyTo)
-        .then(() => done())
-        .catch((e) => console.log(e.stack));
+        return Promise.all(list.map(loadLocale));
+    };
+
+    const loadLocale = lang => {
+        const url = `https://locize.wvservices.com/30ffe655-de56-4196-b274-5edc3080c724/latest/${lang}/electron`;
+        const out = join(root, 'locales', lang, `electron.json`);
+
+        return download(url, out);
+    };
+
+    const copyNodeModules = () => Promise.all(meta.copyNodeModules.map(name => copy(name, join(root, name))));
+    const copyI18next = () => copy(join(__dirname, 'node_modules', 'i18next', 'dist'), join(root, 'i18next'));
+
+    readdir(srcDir)
+        .then(excludeTypeScrip)
+        .then(list => Promise.all(list.map(copyItem)))
+        .then(makePackageJSON)
+        .then(loadLocales)
+        .then(copyNodeModules)
+        .then(copyI18next)
+        .then(() => done());
 });
 
 task('data-service', function () {
-    execSync(`${join('node_modules', '.bin', 'tsc')} -p data-service && ${join('node_modules', '.bin', 'browserify')} ${join('data-service', 'index.js')} -s ds -u ts-utils -o ${join('data-service-dist', 'data-service.js')}`);
+    execSync('npm run data-service');
 });
 
 task('all', [

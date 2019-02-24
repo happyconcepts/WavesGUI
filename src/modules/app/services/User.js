@@ -7,7 +7,10 @@
      */
 
     const NOT_SYNC_FIELDS = [
-        'changeSetting'
+        'changeSetting',
+        'extraFee',
+        'networkError',
+        'changeScript'
     ];
 
     /**
@@ -18,14 +21,27 @@
      * @param {UserRouteState} UserRouteState
      * @param {ModalManager} modalManager
      * @param {TimeLine} timeLine
+     * @param {$injector} $injector
+     * @param {app.utils} utils
+     * @param {/} themes
      * @return {User}
      */
-    const factory = function (storage, $state, defaultSettings, state, UserRouteState, modalManager, timeLine, themes) {
+    const factory = function (storage,
+                              $state,
+                              defaultSettings,
+                              state,
+                              UserRouteState,
+                              modalManager,
+                              timeLine,
+                              $injector,
+                              utils,
+                              themes) {
 
         const tsUtils = require('ts-utils');
+        const ds = require('data-service');
+        const { Money } = require('@waves/data-entities');
 
         class User {
-
 
             /**
              * @type {Signal<string>} setting path
@@ -34,75 +50,132 @@
                 return this._settings.change;
             }
 
+            /**
+             * @type {boolean}
+             */
+            networkError = false;
+            /**
+             * @type {string}
+             */
+            address = null;
+            /**
+             * @type {string}
+             */
+            id = null;
+            /**
+             * @type {string}
+             */
+            name = null;
+            /**
+             * @type {string}
+             */
+            publicKey = null;
+            /**
+             * @type {string}
+             */
+            encryptedSeed = null;
+            /**
+             * @type {string}
+             */
+            userType = null;
+            /**
+             * @type {object}
+             */
+            settings = Object.create(null);
+            /**
+             * @type {boolean}
+             */
+            noSaveToStorage = false;
+            /**
+             * @type {number}
+             */
+            lastLogin = Date.now();
+            /**
+             * @type {{signature: string, timestamp: number}}
+             */
+            matcherSign = null;
+            /**
+             * @type {Money}
+             */
+            extraFee = null;
+            /**
+             * @type {Signal<void>}
+             */
+            changeScript = new tsUtils.Signal();
+            /**
+             * @type {DefaultSettings}
+             * @private
+             */
+            _settings = defaultSettings.create(Object.create(null));
+            /**
+             * @type {Deferred}
+             * @private
+             */
+            _dfr = $.Deferred();
+            /**
+             * @type {object}
+             * @private
+             */
+            __props = Object.create(null);
+            /**
+             * @type {string}
+             * @private
+             */
+            _password = null;
+            /**
+             * @type {number}
+             * @private
+             */
+            _changeTimer = null;
+            /**
+             * @type {Array}
+             * @private
+             */
+            _stateList = null;
+            /**
+             * @type {Array}
+             * @private
+             */
+            _fieldsForSave = [];
+            /**
+             * @type {Array}
+             * @private
+             */
+            _history = [];
+            /**
+             * @type {boolean}
+             * @private
+             */
+            _hasScript = false;
+            /**
+             * @type {Poll}
+             * @private
+             */
+            _scriptInfoPoll = null;
+
             constructor() {
-                /**
-                 * @type {string}
-                 */
-                this.address = null;
-                /**
-                 * @type {string}
-                 */
-                this.name = null;
-                /**
-                 * @type {string}
-                 */
-                this.publicKey = null;
-                /**
-                 * @type {string}
-                 */
-                this.encryptedSeed = null;
-                /**
-                 * @type {object}
-                 */
-                this.settings = Object.create(null);
-                /**
-                 * @type {boolean}
-                 */
-                this.noSaveToStorage = false;
-                /**
-                 * @type {DefaultSettings}
-                 * @private
-                 */
-                this._settings = defaultSettings.create(Object.create(null));
-                /**
-                 * @type {number}
-                 */
-                this.lastLogin = Date.now();
-                /**
-                 * @type {Deferred}
-                 * @private
-                 */
-                this._dfr = $.Deferred();
-                /**
-                 * @type {object}
-                 * @private
-                 */
-                this.__props = Object.create(null);
-                /**
-                 * @type {string}
-                 * @private
-                 */
-                this._password = null;
-                /**
-                 * @type {number}
-                 * @private
-                 */
-                this._changeTimer = null;
-                /**
-                 * @type {Array}
-                 * @private
-                 */
-                this._stateList = null;
-                /**
-                 * @type {Array}
-                 * @private
-                 */
-                this._fieldsForSave = [];
 
                 this._setObserve();
                 this._settings.change.on(() => this._onChangeSettings());
 
                 Mousetrap.bind(['ctrl+shift+k'], () => this.switchNextTheme());
+
+                this.onLogin().then(() => {
+                    /**
+                     * @type {Poll}
+                     */
+                    const Poll = $injector.get('Poll');
+                    setTimeout(() => {
+                        this._scriptInfoPoll = new Poll(() => this.updateScriptAccountData(), () => null, 10000);
+                    }, 30000);
+                });
+            }
+
+            /**
+             * @return {boolean}
+             */
+            hasScript() {
+                return this._hasScript;
             }
 
             /**
@@ -188,6 +261,20 @@
                 return settings.get(name);
             }
 
+            getDefaultUserSettings(settings) {
+                return defaultSettings.create({ ...settings });
+            }
+
+            /**
+             * @param {User} user
+             * @param {string} name
+             * @return {DefaultSettings}
+             */
+            getSettingsByUser(user) {
+                const settings = this.getDefaultUserSettings(user.settings);
+                return settings;
+            }
+
             /**
              * @param {string} name
              * @param {*} value
@@ -211,8 +298,9 @@
              *
              */
             login(data) {
+                this.networkError = false;
                 return this._addUserData(data)
-                    .then(() => analytics.push('User', `Login.${WavesApp.type}`));
+                    .then(() => analytics.push('User', `Login.${WavesApp.type}.${data.userType}`));
             }
 
             /**
@@ -222,32 +310,37 @@
              * @param {string} data.encryptedSeed
              * @param {string} data.publicKey
              * @param {string} data.password
+             * @param {string} data.userType
              * @param {boolean} data.saveToStorage
              * @param {boolean} hasBackup
              * @return Promise
              */
             create(data, hasBackup, restore) {
+
                 this.noSaveToStorage = !data.saveToStorage;
 
+                data.userType = data.userType || 'seed';
+
                 return this._addUserData({
+                    id: data.id,
                     api: data.api,
                     address: data.address,
                     password: data.password,
                     name: data.name,
+                    userType: data.userType,
                     encryptedSeed: data.encryptedSeed,
                     publicKey: data.publicKey,
                     settings: {
                         termsAccepted: false,
-                        hasBackup: hasBackup,
+                        hasBackup,
                         lng: i18next.language,
                         theme: themes.getDefaultTheme(),
                         candle: 'blue'
                     }
                 }).then(() => analytics.push(
                     'User',
-                    `${restore ? 'Restore' : 'Create'}.${WavesApp.type}`,
-                    document.referrer)
-                );
+                    `${restore ? 'Restore' : 'Create'}.${WavesApp.type}.${data.userType}`,
+                    document.referrer));
             }
 
             logout() {
@@ -278,9 +371,15 @@
              * @param {string} state    state name
              */
             applyState(state) {
+                this._history.push(state.name);
+                this._history = this._history.slice(-10);
                 if (this._stateList) {
                     this._stateList.some((item) => item.applyState(state, this));
                 }
+            }
+
+            getLastState() {
+                return this._history.length > 1 ? this._history[this._history.length - 2] : 'welcome';
             }
 
             /**
@@ -334,20 +433,72 @@
                 this.setSetting('theme', newTheme);
             }
 
+
+            /**
+             * @return {Promise<any>}
+             */
+            async updateScriptAccountData(item = null) {
+                let waves;
+                const address = item ? item.address : this.address;
+                try {
+                    this.networkError = false;
+                    waves = await ds.api.assets.get(WavesApp.defaultAssets.WAVES);
+                } catch (e) {
+                    this.networkError = true;
+                    throw new Error('Can\'t get Waves asset');
+                }
+
+                const addHasScript = value => {
+                    if (this._hasScript !== value) {
+                        this._hasScript = value;
+                        this.changeScript.dispatch();
+                    }
+                };
+
+                try {
+                    const response = await ds.fetch(`${ds.config.get('node')}/addresses/scriptInfo/${address}`);
+                    this.extraFee = Money.fromCoins(response.extraFee, waves);
+                    addHasScript(response.extraFee !== 0);
+                } catch (e) {
+                    addHasScript(!!this._hasScript);
+                    this.extraFee = this.extraFee || Money.fromCoins(0, waves);
+                }
+            }
+
+            /**
+             * @return {Promise<{signature, timestamp}>}
+             */
+            addMatcherSign() {
+                /**
+                 * @type {Promise<{signature: string, timestamp: number}>}
+                 */
+                const promise = utils.signUserOrders({ matcherSign: this.matcherSign });
+
+                promise.then(matcherSign => {
+                    this.matcherSign = matcherSign;
+                    ds.app.addMatcherSign(matcherSign.timestamp, matcherSign.signature);
+                });
+
+                return promise;
+            }
+
             /**
              * @param {object} data
-             * @param {ISignatureApi} data.api
+             * @param {Adapter} data.api
              * @param {string} data.address
+             * @param {string} data.userType
              * @param {string} [data.encryptedSeed]
              * @param {string} [data.publicKey]
              * @param {string} data.password
+             * @param {string} data.userType
              * @param {object} [data.settings]
              * @param {boolean} [data.settings.termsAccepted]
              * @return Promise
              * @private
              */
             _addUserData(data) {
-                return this._loadUserByAddress(data.address)
+                return data.api.getPublicKey().then(publicKey => (data.publicKey = publicKey))
+                    .then(() => this._loadUserByAddress(data.address))
                     .then((item) => {
                         this._fieldsForSave.forEach((propertyName) => {
                             if (data[propertyName] != null) {
@@ -369,8 +520,7 @@
                             this._password = data.password;
                         }
 
-                        const states = WavesApp.stateTree.find('main')
-                            .getChildren();
+                        const states = WavesApp.stateTree.find('main').getChildren();
                         this._stateList = states.map((baseTree) => {
                             const id = baseTree.id;
                             return new UserRouteState('main', id, this._settings.get(`${id}.activeState`));
@@ -380,15 +530,27 @@
                             ds.config.set(key, this._settings.get(`network.${key}`));
                         });
 
-                        return ds.app.login(data.address, data.api)
+                        ds.config.set('oracleAddress', this.getSetting('assetsOracle'));
+
+                        ds.app.login(data.address, data.api);
+
+                        data.api.onDestroy(() => {
+                            this.logout();
+                        });
+
+                        return this.addMatcherSign()
+                            .catch(() => Promise.resolve())
                             .then(() => {
                                 this.changeTheme();
                                 this.changeCandle();
-                                this._save();
+                                return this._save();
                             })
-                            .then(() => {
-                                this._logoutTimer();
-                                this._dfr.resolve();
+                            .then(() => this._logoutTimer())
+                            .then(() => this.updateScriptAccountData())
+                            .then(this._dfr.resolve)
+                            .catch((e) => {
+                                ds.app.logOut();
+                                return Promise.reject(e);
                             });
                     });
             }
@@ -397,7 +559,7 @@
              * @private
              */
             _logoutTimer() {
-                this.receive(state.signals.sleep, (min) => {
+                this.receive(state.signals.sleep, min => {
                     if (min >= this._settings.get('logoutAfterMin')) {
                         this.logout();
                     }
@@ -513,6 +675,8 @@
         'UserRouteState',
         'modalManager',
         'timeLine',
+        '$injector',
+        'utils',
         'themes'
     ];
 

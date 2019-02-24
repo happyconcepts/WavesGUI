@@ -25,10 +25,16 @@
                 this.subStateList = stateManager.subStateList;
                 this.menuList = stateManager.getStateTree();
                 this.activeState = $state.$current.name.slice($state.$current.name.lastIndexOf('.') + 1);
-
+                this.userType = user.userType;
                 if (!this.isLogined) {
                     this.activeState = this.activeState.replace('-demo', '');
                 }
+
+                this.isScript = user.hasScript();
+                this.isKeeper = user.userType === 'wavesKeeper';
+                this.isLedger = user.userType === 'ledger';
+
+                this.hasTypeHelp = this.isScript && (this.isLedger || this.isKeeper);
             }
 
             open(sref) {

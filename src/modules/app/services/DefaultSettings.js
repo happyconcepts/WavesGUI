@@ -26,6 +26,7 @@
                  * @private
                  */
                 this.defaults = {
+                    advancedMode: false,
                     network: WavesApp.network,
                     lastOpenVersion: '',
                     whatsNewList: [],
@@ -38,11 +39,13 @@
                     hasBackup: true,
                     termsAccepted: true,
                     baseAssetId: WavesApp.defaultAssets.USD,
+                    assetsOracle: WavesApp.oracle,
                     events: Object.create(null),
                     lng: 'en',
                     send: {
                         defaultTab: 'singleSend'
                     },
+                    orderLimit: 0.05,
                     pinnedAssetIdList: [
                         WavesApp.defaultAssets.WAVES,
                         WavesApp.defaultAssets.BTC,
@@ -68,6 +71,9 @@
                             ]
                         },
                         transactions: {
+                            filter: 'all'
+                        },
+                        leasing: {
                             filter: 'all'
                         },
                         portfolio: {

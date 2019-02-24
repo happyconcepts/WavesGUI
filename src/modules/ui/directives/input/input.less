@@ -15,6 +15,11 @@ input[type="checkbox"] {
   font-size: @font-size-control-big;
   color: @color-disabled-900;
   background: @color-white;
+  text-align: left;
+  box-shadow: none;
+  appearance: none;
+  -moz-appearance: none;
+  -webkit-appearance: none;
 
   &.blue {
     background: @color-basic-200;
@@ -26,12 +31,6 @@ input[type="checkbox"] {
     font-size: @font-size-control-big-responsive;
   }
 
-  text-align: left;
-  box-shadow: none;
-  appearance: none;
-  -moz-appearance: none;
-  -webkit-appearance: none;
-
   &::placeholder {
     color: @color-basic-500;
   }
@@ -40,6 +39,10 @@ input[type="checkbox"] {
     background-color: @color-white;
     border: 1px solid @color-basic-200;
     border-radius: @border-radius;
+
+    &.disabled {
+      background: @color-basic-50;
+    }
   }
 
   &.tiny {
@@ -91,25 +94,32 @@ input[type="checkbox"] {
       }
     }
   }
-
 }
 
 w-input {
   display: block;
   width: 100%;
+  transform: translate3d(0, 0, 0);
 
   .w-input-wrap {
     position: relative;
     width: 100%;
 
-    input[type="text"], input[type="password"], input[type="number"], textarea {
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    textarea {
       .input-like();
 
       &:not(.embed):not(.no-validate) {
         &:focus, &.focus {
           background-color: @color-white;
           color: @color-basic-900;
-          border-color: @color-submit-400;
+          border-color: @input-focused-border;
+        }
+
+        &.disabled {
+          background: @color-basic-50;
         }
 
         &.ng-touched {
@@ -117,7 +127,7 @@ w-input {
             border-color: @color-success-300;
           }
           &.ng-invalid:not(:focus):not(.focus) {
-            border-color: @color-warning-400;
+            border-color: @color-error-200;
           }
         }
       }
@@ -125,6 +135,10 @@ w-input {
       &.no-validate:focus,
       &.embed:focus {
         border: 1px solid @color-submit-400;
+      }
+
+      &[disabled="disabled"] {
+        background-color: @color-basic-50;
       }
     }
 
@@ -147,6 +161,11 @@ w-input {
   }
 
   &[textarea="true"] {
+
+    &.large textarea {
+      min-height: 300px;
+      resize: vertical;
+    }
 
     &.tall textarea {
       min-height: 150px;
@@ -181,18 +200,16 @@ w-input {
     &.input-type-password input[type="password"] {
       padding-right: 50px;
     }
-
-    &.valid.touched::after {
-      background: url(/img/icons/input-valid-icon.svg) no-repeat center center;
-      width: 13px;
-      height: 10px;
-    }
-
-    &.touched.invalid:not(.focused)::after {
-      background: url(/img/icons/input-invalid-icon.svg) no-repeat center center;
-      width: 11px;
-      height: 11px;
-    }
+    // &.valid.touched::after {
+    //   background: url(/img/icons/input-valid-icon.svg) no-repeat center center;
+    //    width: 13px;
+    //   height: 10px;
+    // }
+    // &.touched.invalid:not(.focused)::after {
+    //   background: url(/img/icons/input-invalid-icon.svg) no-repeat center center;
+    //   width: 11px;
+    //   height: 11px;
+    // }
   }
 
   .byte-validator__help {
@@ -206,7 +223,7 @@ w-input {
 
   div.focused .byte-validator__help {
     display: block;
-    color: @color-disabled-500;
+    color: @color-basic-500;
   }
 
   div.touched.invalid .byte-validator__help,
@@ -214,13 +231,12 @@ w-input {
     display: block;
     color: @color-error-500;
   }
-
 }
 
 form.ng-submitted {
   input[type="text"], input[type="password"], input[type="number"], textarea {
     &.ng-invalid:not(.embed):not(:focus):not(.focus):not(.no-validate) {
-      border-color: @color-warning-400;
+      border-color: @color-error-200;
     }
   }
 }

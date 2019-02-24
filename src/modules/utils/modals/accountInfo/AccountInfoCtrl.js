@@ -4,6 +4,7 @@
     const MIN_ALIAS_LENGTH = 4;
     const MAX_ALIAS_LENGTH = 30;
     const ALIAS_PATTERN = /^[a-z0-9-@_.]*$/;
+    const { SIGN_TYPE } = require('@waves/signature-adapter');
 
     /**
      * @param Base
@@ -14,7 +15,7 @@
      * @param {createPoll} createPoll
      * @return {AccountInfoCtrl}
      */
-    const controller = function (Base, $scope, user, waves, notification, createPoll) {
+    const controller = function (Base, $scope, user, waves, notification, createPoll, utils) {
 
         class AccountInfoCtrl extends Base {
 
@@ -61,6 +62,18 @@
                  */
                 this.invalidPattern = false;
                 /**
+                 * @type {string}
+                 */
+                this.transactionId = '';
+                /**
+                 * @type {boolean}
+                 */
+                this.signLoader = false;
+                /**
+                 * @type {boolean}
+                 */
+                this.signDeviceFail = false;
+                /**
                  * @type {boolean}
                  */
                 this.invalidExist = false;
@@ -69,9 +82,26 @@
                  * @private
                  */
                 this._balance = null;
+                /**
+                 * @type {string}
+                 */
+                this.userType = user.userType;
+                /**
+                 * @type {boolean}
+                 */
+                this.isLedger = user.userType === 'ledger';
+                /**
+                 * @type {boolean}
+                 */
+                this.isKeeper = user.userType === 'wavesKeeper';
+
+                /**
+                 * @type {boolean}
+                 */
+                this.errorCreateAliasMsg = '';
 
                 const poll = createPoll(this, this._getBalance, '_balance', 5000, { isBalance: true, $scope });
-                const feePromise = waves.node.getFee({ type: WavesApp.TRANSACTION_TYPES.NODE.CREATE_ALIAS });
+                const feePromise = waves.node.getFee({ type: SIGN_TYPE.CREATE_ALIAS });
 
                 Promise.all([feePromise, poll.ready])
                     .then(([fee]) => {
@@ -85,23 +115,52 @@
                 this.observe(['newAlias'], this._validateNewAlias);
             }
 
-            createAlias() {
-                return ds.broadcast(10, { alias: this.newAlias, fee: this.fee })
-                    .then(() => {
-                        analytics.push('User', `User.CreateAlias.Success.${WavesApp.type}`);
-                        this.aliases.push(this.newAlias);
-                        this.newAlias = '';
-                        this.createAliasStep = 0;
-                        notification.info({
-                            ns: 'app.utils',
-                            title: { literal: 'modal.account.notifications.aliasCreated' }
-                        });
-                        $scope.$digest();
-                    })
-                    .catch(() => {
-                        analytics.push('User', `User.CreateAlias.Error.${WavesApp.type}`);
-                    });
+            getSignableTx() {
+                const type = 10;
+                const timestamp = ds.utils.normalizeTime(Date.now());
+                const data = { alias: this.newAlias, fee: this.fee, timestamp };
+                return ds.signature.getSignatureApi()
+                    .makeSignable({ type, data });
+            }
 
+            createAlias() {
+                const signable = this.getSignableTx();
+                return signable.getId()
+                    .then(
+                        (id) => {
+                            this.signDeviceFail = false;
+                            this.transactionId = id;
+                            this.signLoader = user.userType && user.userType !== 'seed';
+                            $scope.$digest();
+                        })
+                    .then(() => signable.getDataForApi())
+                    .then(
+                        (preparedTx) => {
+                            if (this.wasDestroed) {
+                                return Promise.reject();
+                            }
+
+                            this.signLoader = false;
+                            return ds.broadcast(preparedTx).then(() => {
+                                analytics.push('User', `User.CreateAlias.Success.${WavesApp.type}`);
+                                this.aliases.push(this.newAlias);
+                                this.newAlias = '';
+                                this.createAliasStep = 0;
+                                notification.info({
+                                    ns: 'app.utils',
+                                    title: { literal: 'modal.account.notifications.aliasCreated' }
+                                });
+                                $scope.$digest();
+                            });
+                        },
+                        () => {
+                            this.signDeviceFail = true;
+                            this.signLoader = false;
+                            $scope.$digest();
+                        })
+                    .catch((error) => {
+                        this.errorCreateAliasMsg = utils.parseError(error);
+                    });
             }
 
             onCopyAddress() {
@@ -169,7 +228,7 @@
         return new AccountInfoCtrl();
     };
 
-    controller.$inject = ['Base', '$scope', 'user', 'waves', 'notification', 'createPoll'];
+    controller.$inject = ['Base', '$scope', 'user', 'waves', 'notification', 'createPoll', 'utils'];
 
     angular.module('app.utils')
         .controller('AccountInfoCtrl', controller);

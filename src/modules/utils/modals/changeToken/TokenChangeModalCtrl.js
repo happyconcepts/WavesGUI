@@ -13,6 +13,11 @@
     const controller = function (Base, $scope, createPoll, utils, waves, user) {
 
         const entities = require('@waves/data-entities');
+        const { SIGN_TYPE } = require('@waves/signature-adapter');
+
+        const ds = require('data-service');
+        const { path } = require('ramda');
+        const { STATUS_LIST } = require('@waves/oracle-data');
 
         class TokenChangeModalCtrl extends Base {
 
@@ -64,6 +69,12 @@
                  */
                 this._waves = null;
 
+                const data = ds.dataManager.getOracleAssetData(money.asset.id);
+                this.isVerified = path(['status'], data) === STATUS_LIST.VERIFIED;
+                this.isGateway = path(['status'], data) === 3;
+                this.ticker = money.asset.ticker;
+                this.description = path(['description', 'en'], data) || money.asset.description;
+
                 const { TokenChangeModalCtrl = {} } = user.getThemeSettings();
 
                 this.options = {
@@ -95,7 +106,8 @@
                     }
                 };
 
-                waves.node.getFee({ type: this.txType }).then((fee) => {
+                const type = this.txType === 'burn' ? SIGN_TYPE.BURN : SIGN_TYPE.REISSUE;
+                waves.node.getFee({ type, assetId: money.asset.id }).then((fee) => {
                     this.fee = fee;
                     $scope.$digest();
                 });
@@ -104,31 +116,61 @@
                 createPoll(this, this._getWavesBalance, '_waves', 1000);
 
                 this.observe(['input', 'issue'], this._createTx);
-                this.observe('_waves', this._changeHasFee);
+                this.observe(['_waves', 'fee'], this._changeHasFee);
             }
 
+            getSignable() {
+                return this.signable;
+            }
+
+            next() {
+                this.step++;
+            }
+
+            /**
+             * @private
+             */
             _getWavesBalance() {
                 return waves.node.assets.balance(WavesApp.defaultAssets.WAVES).then(({ available }) => available);
             }
 
+            /**
+             * @private
+             */
             _changeHasFee() {
+                if (!this._waves || !this.fee) {
+                    return null;
+                }
+
                 this.noFee = this._waves.lt(this.fee);
             }
 
+            /**
+             * @private
+             */
             _createTx() {
                 const input = this.input;
+                const type = this.txType === 'burn' ? SIGN_TYPE.BURN : SIGN_TYPE.REISSUE;
+                const quantityField = this.txType === 'burn' ? 'amount' : 'quantity';
+
 
                 if (input) {
-                    this.tx = waves.node.transactions.createTransaction(this.txType, {
+                    const tx = waves.node.transactions.createTransaction({
+                        type,
                         assetId: input.asset.id,
                         description: input.asset.description,
                         fee: this.fee,
-                        quantity: input,
+                        [quantityField]: input,
                         precision: input.asset.precision,
                         reissuable: this.issue
                     });
+                    this.signable = ds.signature.getSignatureApi().makeSignable({
+                        type,
+                        data: tx
+                    });
                 } else {
                     this.tx = null;
+                    this.signable = null;
                 }
             }
 

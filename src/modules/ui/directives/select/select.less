@@ -16,6 +16,15 @@ w-select {
     height: @height-control-big;
   }
 
+  &.disabled .select {
+    background: @color-basic-50;
+    cursor: default;
+  }
+
+  &.select__no-user-select {
+    user-select: none;
+  }
+
   @media screen and (max-width: 768px) {
     &.big {
       height: @height-control-big-responsive;
@@ -23,10 +32,11 @@ w-select {
   }
 
   .select {
-    position: relative;
     height: 100%;
+    position: relative;
 
     .title {
+      position: relative;
       border: 1px solid @color-basic-200;
       height: 100%;
       font-size: @font-size-control;
@@ -71,8 +81,6 @@ w-select {
       border: 1px solid @color-basic-200;
       border-top: none;
       border-radius: 0 0 @border-radius @border-radius;
-      left: 0;
-      top: 100%;
       width: 100%;
       background-color: @color-white;
       z-index: 10;
@@ -100,7 +108,6 @@ w-select {
     }
 
     &.to-up {
-
       .select-list {
         border: 1px solid @color-basic-100;
         border-bottom: none;
@@ -140,6 +147,4 @@ w-select {
       }
     }
   }
-
-
 }

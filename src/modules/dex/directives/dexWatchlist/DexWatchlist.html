@@ -1,15 +1,16 @@
 <div class="wrapper">
 
     <div class="titles-wrap">
-        <a href="#"
-           ng-repeat="tab in $ctrl.tabs track by tab.value"
+        <div ng-repeat="tab in $ctrl.tabs track by tab.value"
            class="title"
            ng-class="{'active': $ctrl.activeTab === tab.value}"
            ng-click="$ctrl.chooseTab(tab.value)">
             <span w-i18n="{{::tab.name}}"></span>
-        </a>
+        </div>
 
-        <w-select ng-model="$ctrl.dropDownId" ng-class="{'active': $ctrl.isActiveSelect}">
+        <w-select ng-model="$ctrl.dropDownId"
+                  ng-class="{'active': $ctrl.isActiveSelect}"
+                  class="select__no-user-select">
             <w-option ng-repeat="option in $ctrl.dropDown track by option.id"
                       value="::option.id">
                 {{::option.name}}
@@ -27,6 +28,24 @@
         <i ng-if="$ctrl.search.length > 0"
            class="input-clear"
            ng-click="$ctrl.search = ''"></i>
+        <w-help-icon ng-if="!$ctrl.search.length">
+            <div class="help-icon__row bold caption-2 basic-700" w-i18n="directives.watchlist.helpIcon.header"></div>
+            <div ng-if="$ctrl.activeTab === 'all'" class="help-icon__row caption-2 basic-700">
+                <div>
+                    <span class="label-background" w-i18n="directives.watchlist.helpIcon.name"></span>
+                    <span class="label-background" w-i18n="directives.watchlist.helpIcon.name1Name2"></span>
+                </div>
+                <div>
+                    <span class="label-background" w-i18n="directives.watchlist.helpIcon.assetId"></span>
+                    <span class="label-background" w-i18n="directives.watchlist.helpIcon.AssetId1AssetId2"></span>
+                </div>
+            </div>
+            <div ng-if="$ctrl.activeTab !== 'all'" class="help-icon__row caption-2 basic-700">
+                <span class="label-background" w-i18n="directives.watchlist.helpIcon.name"></span>/
+                <span class="label-background" w-i18n="directives.watchlist.helpIcon.assetId"></span>
+            </div>
+            <div class="help-icon__row caption-2 basic-700" w-i18n="directives.watchlist.helpIcon.description"></div>
+        </w-help-icon>
     </div>
     <w-loader ng-if="$ctrl.pending"></w-loader>
     <w-smart-table ng-if="!$ctrl.pending"
@@ -73,11 +92,11 @@
                 <div>
                     <a href="#"
                        ng-click="$ctrl.showAssetInfo($event, pair.amountAsset)"
-                       class="disabled-900">{{::pair.amountAsset.id}}</a> <span>/</span>
+                       class="basic-700">{{::pair.amountAsset.id}}</a> <span>/</span>
                 </div>
                 <a href="#"
                    ng-click="$ctrl.showAssetInfo($event, pair.priceAsset)"
-                   class="disabled-900">{{::pair.priceAsset.id}}</a>
+                   class="basic-700">{{::pair.priceAsset.id}}</a>
             </w-table-cell>
         </w-table-row>
     </w-smart-table>

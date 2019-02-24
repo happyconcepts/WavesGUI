@@ -1,11 +1,17 @@
 /* eslint-disable no-console */
 /* global BigNumber */
+
 (function () {
     'use strict';
 
-    const tsUtils = require('ts-utils');
+    const { isEmpty, getPaths, get, Signal } = require('ts-utils');
     const tsApiValidator = require('ts-api-validator');
     const { WindowAdapter, Bus } = require('@waves/waves-browser-bus');
+    const { splitEvery, pipe, path } = require('ramda');
+    const { libs } = require('@waves/signature-generator');
+    const ds = require('data-service');
+    const { SIGN_TYPE } = require('@waves/signature-adapter');
+    const { Money, BigNumber } = require('@waves/data-entities');
 
     class BigNumberPart extends tsApiValidator.BasePart {
 
@@ -20,8 +26,6 @@
         }
 
     }
-
-    const dataEntities = require('@waves/data-entities');
 
     /**
      * @name app.utils
@@ -44,6 +48,86 @@
                 BigNumberPart
             },
 
+            removeUrlProtocol(url) {
+                return url.replace(/.+?(:\/\/)/, '');
+            },
+
+            /**
+             * @name app.utils#getUrlForRoute
+             * @param {string} [url]
+             * @return string
+             */
+            getUrlForRoute(url) {
+                url = decodeURI(url || location.href);
+
+                const getHash = url => {
+                    if (url.includes('#')) {
+                        return url.slice(url.indexOf('#')).replace('#', '/');
+                    } else {
+                        return '';
+                    }
+                };
+
+                const processor = pipe(
+                    utils.removeUrlProtocol,
+                    getHash
+                );
+
+                return processor(url);
+            },
+
+            /**
+             * @name app.utils#getRouterParams
+             * @param {string} url
+             * @return object
+             */
+            getRouterParams(url) {
+                /**
+                 * @type {typeof Router}
+                 */
+                const Router = $injector.get('Router');
+                const router = new Router();
+
+                const makeRouterHandler = name => (params = Object.create(null), search = Object.create(null)) => {
+                    const url = Router.ROUTES[name];
+                    return { name, url, data: { ...params, ...search } };
+                };
+
+                Object.keys(Router.ROUTES).forEach(name => {
+                    const handler = makeRouterHandler(name);
+                    router.registerRoute(Router.ROUTES[name], handler);
+                });
+
+                return router.apply(url);
+            },
+
+            /**
+             * @name app.utils#createQS
+             * @param {object} obj
+             * @return {string}
+             */
+            createQS(obj) {
+                /* eslint-disable */
+                const customSerialize = v => {
+                    switch (true) {
+                        case v instanceof Date:
+                            return v.getTime();
+                        default:
+                            return v;
+                    }
+                };
+                const createKeyValue = (key, v) => `${key}=${customSerialize(v)}`;
+                const createArrayKeyValue = (key, values) => values.map(v => createKeyValue(`${key}[]`, v)).join('&');
+                const qs = Object.entries(obj)
+                    .filter(([_, value]) => value !== undefined)
+                    .map(([key, value]) => {
+                        return Array.isArray(value) ? createArrayKeyValue(key, value) : createKeyValue(key, value);
+                    })
+                    .join('&');
+                return qs === '' ? qs : `?${qs}`;
+                /* eslint-enable */
+            },
+
             /**
              * @name app.utils#observe
              * @param {object} target
@@ -58,22 +142,87 @@
             },
 
             /**
+             * @name app.utils#getPublicKeysFromScript
+             * @param {string} script
+             * @return {Array<string>}
+             */
+            getPublicKeysFromScript(script) {
+                const toBytes = key => splitEvery(2, key)
+                    .map(byte16 => parseInt(byte16, 16));
+
+                return (script.match(/ByteVector\(\d+\sbytes,\s(.[^)]+)/g) || [])
+                    .map(res => res.replace(/ByteVector\(\d+\sbytes,\s0x/, ''))
+                    .map(toBytes)
+                    .map(libs.base58.encode);
+            },
+
+            /**
              * @name app.utils#debounce
-             * @param {function} handler
+             * @param {function} callback
              * @param {number} [timeout]
              * @return {Function}
              */
-            debounce(handler, timeout) {
-                let timer = null;
-                return function (...args) {
-                    if (timer) {
-                        clearTimeout(timer);
-                    }
-                    timer = setTimeout(() => {
-                        timer = null;
-                        handler.call(this, ...args);
-                    }, timeout);
+            debounce(callback, timeout) {
+                const control = {
+                    queued: false,
+                    args: null
                 };
+                return function (...args) {
+                    control.args = args;
+                    if (!control.queued) {
+                        setTimeout(() => {
+                            control.queued = false;
+                            callback.call(this, ...control.args);
+                        }, timeout);
+                    }
+                    control.queued = true;
+                };
+            },
+
+            /**
+             * @name app.utils#timeoutPromise
+             * @param {Promise} promise
+             * @param {number} timeout
+             */
+            timeoutPromise(promise, timeout) {
+                let timer;
+                const timeoutPromise = new Promise((_, reject) => {
+                    timer = setTimeout(() => {
+                        reject(new Error('Timeout error!'));
+                    }, timeout);
+                });
+                promise.finally(() => {
+                    clearTimeout(timer);
+                });
+                return Promise.race([promise, timeoutPromise]);
+            },
+
+            /**
+             * @name app.utils#parseElectronUrl
+             * @param {string} url
+             * @return {{path: string, search: string, hash: string}}
+             */
+            parseElectronUrl(url) {
+                const [pathAndSearch, hash] = url.split('#');
+                const [path, search] = pathAndSearch.split('?');
+
+                return {
+                    path,
+                    search: `?${search || ''}`,
+                    hash: `#${hash || ''}`
+                };
+            },
+
+            /**
+             * @name app.utils#redirect
+             * @param {string} url
+             */
+            redirect(url) {
+                if (WavesApp.isDesktop()) {
+                    window.openInBrowser(url);
+                } else {
+                    location.href = url;
+                }
             },
 
             /**
@@ -85,12 +234,36 @@
                 const hashes = search.slice(search.indexOf('?') + 1).split('&').filter(Boolean);
                 const params = Object.create(null);
 
+                const normalizeValue = value => {
+                    if (value === 'null') {
+                        return null;
+                    }
+                    const num = Number(value);
+                    return String(num) === value ? num : value;
+                };
+
+                const add = (name, value) => {
+                    if (value == null) {
+                        params[name] = true;
+                    } else {
+                        params[name] = normalizeValue(decodeURIComponent(value));
+                    }
+                };
+
+                const addArray = (name, value) => {
+                    const key = name.replace('[]', '');
+                    if (!params[key]) {
+                        params[key] = [];
+                    }
+                    params[key].push(normalizeValue(decodeURIComponent(value)));
+                };
+
                 hashes.forEach((hash) => {
                     const [key, val] = hash.split('=');
-                    if (val == null) {
-                        params[key] = true;
+                    if (key.includes('[]')) {
+                        addArray(key, val);
                     } else {
-                        params[key] = decodeURIComponent(val);
+                        add(key, val);
                     }
                 });
 
@@ -154,8 +327,7 @@
             animateTransform($element, to) {
                 const prefixis = ['', '-ms-', '-moz-', '-o-', '-webkit-'];
                 return $q((resolve) => {
-                    const transform = $element.css('transform');
-                    const from = transform === 'none' ? { x: 0, y: 0 } : { x: 0, y: 0 };
+                    const from = { x: 0, y: 0 };
                     $element.stop(true, true).animate({}, {
                         progress: function (tween, progress) {
                             const x = (to.x - from.x) * progress + from.x;
@@ -273,11 +445,19 @@
                     return a === b;
                 }
 
-                const pathsA = tsUtils.getPaths(a);
-                const pathsB = tsUtils.getPaths(b);
+                if (a instanceof Money && b instanceof Money) {
+                    return a.asset.id === b.asset.id && a.eq(b);
+                }
+
+                if (a instanceof BigNumber && b instanceof BigNumber) {
+                    return a.eq(b);
+                }
+
+                const pathsA = getPaths(a);
+                const pathsB = getPaths(b);
 
                 return pathsA.length === pathsB.length && pathsA.every((path, index) => {
-                    return tsUtils.get(a, path) === tsUtils.get(b, path) && (String(path) === String(pathsB[index]));
+                    return get(a, path) === get(b, path) && (String(path) === String(pathsB[index]));
                 });
             },
 
@@ -415,7 +595,7 @@
             importUsersByWindow(win, origin, timeout) {
                 return new Promise((resolve, reject) => {
                     const adapter = new WindowAdapter(
-                        { win: window, origin: WavesApp.targetOrigin },
+                        { win: window, origin: WavesApp.origin },
                         { win, origin }
                     );
                     const bus = new Bus(adapter);
@@ -522,11 +702,7 @@
                         return [];
                     }
 
-                    if (origin === WavesApp.betaOrigin) {
-                        resolve(response);
-                    } else {
-                        resolve(response.accounts && response.accounts.map(utils.remapOldClientAccounts) || []);
-                    }
+                    resolve(response.accounts && response.accounts.map(utils.remapOldClientAccounts) || []);
                 };
             },
 
@@ -627,7 +803,7 @@
              */
             toHash(list, key) {
                 return list.reduce((result, item) => {
-                    result[tsUtils.get(item, key)] = item;
+                    result[get(item, key)] = item;
                     return result;
                 }, Object.create(null));
             },
@@ -685,7 +861,7 @@
              */
             parseAngularParam(attribute, $scope, destroy) {
                 const exp = _hasExp(attribute) && attribute;
-                const change = new tsUtils.Signal();
+                const change = new Signal();
 
                 const result = utils.liteObject({
                     attribute, exp, change, value: null
@@ -839,6 +1015,29 @@
             },
 
             /**
+             * @name app.utils#getEventInfo
+             * @param {object} event
+             * @return {object}
+             */
+            getEventInfo(event) {
+                let newEvent;
+                if ('changedTouches' in event.originalEvent) {
+                    newEvent = {
+                        ...event,
+                        pageX: event.changedTouches[0].pageX,
+                        pageY: event.changedTouches[0].pageY,
+                        screenX: event.changedTouches[0].screenX,
+                        screenY: event.changedTouches[0].screenY,
+                        clientX: event.changedTouches[0].clientX,
+                        clientY: event.changedTouches[0].clientY
+                    };
+                } else {
+                    newEvent = event;
+                }
+                return newEvent;
+            },
+
+            /**
              * @name app.utils#comparators
              */
             comparators: {
@@ -850,11 +1049,7 @@
                             return -1;
                         }
                     } else if (b == null) {
-                        if (a == null) {
-                            return 0;
-                        } else {
-                            return 1;
-                        }
+                        return 1;
                     }
 
                     if (a > b) {
@@ -875,11 +1070,7 @@
                             return 1;
                         }
                     } else if (b == null) {
-                        if (a == null) {
-                            return 0;
-                        } else {
-                            return -1;
-                        }
+                        return -1;
                     }
 
                     if (a > b) {
@@ -926,7 +1117,7 @@
                 },
                 smart: {
                     asc: function (a, b) {
-                        if (a instanceof ds.wavesDataEntities.Money && b instanceof ds.wavesDataEntities.Money) {
+                        if (a instanceof Money && b instanceof Money) {
                             return utils.comparators.money.asc(a, b);
                         } else if (a instanceof BigNumber && b instanceof BigNumber) {
                             return utils.comparators.bigNumber.asc(a, b);
@@ -935,7 +1126,7 @@
                         return utils.comparators.asc(a, b);
                     },
                     desc: function (a, b) {
-                        if (a instanceof ds.wavesDataEntities.Money && b instanceof ds.wavesDataEntities.Money) {
+                        if (a instanceof Money && b instanceof Money) {
                             return utils.comparators.money.desc(a, b);
                         } else if (a instanceof BigNumber && b instanceof BigNumber) {
                             return utils.comparators.bigNumber.desc(a, b);
@@ -981,12 +1172,273 @@
             },
 
             /**
+             * @name app.utils#getExchangeTotalPrice
+             * @oaram {Money} amount
+             * @param {Money} price
+             * @return string
+             */
+            getExchangeTotalPrice(amount, price) {
+                const amountTokens = amount.getTokens();
+                const priceTokens = price.getTokens();
+                const precision = price.asset.precision;
+                return amountTokens.times(priceTokens).toFormat(precision);
+            },
+
+            /**
+             * @name app.utils#getExchangeFee
+             * @param {IExchange} tx
+             * @return Money
+             */
+            getExchangeFee(tx) {
+                /**
+                 * @type {User}
+                 */
+                const user = $injector.get('user');
+                return [tx.order1, tx.order2]
+                    .filter(order => user.publicKey === order.senderPublicKey)
+                    .map(order => order.matcherFee)
+                    .reduce((acc, item) => acc.add(item), tx.fee.cloneWithTokens(0));
+            },
+
+            /**
+             * @name app.utils#getTransactionTypeName
+             * @param tx
+             * @return string
+             */
+            getTransactionTypeName(tx) {
+                const TYPES = WavesApp.TRANSACTION_TYPES.EXTENDED;
+                const SPONSOR_START = TYPES.SPONSORSHIP_START;
+                const SPONSOR_STOP = TYPES.SPONSORSHIP_STOP;
+
+                switch (tx.type) {
+                    case SIGN_TYPE.TRANSFER:
+                        return _getTransferType(tx);
+                    case SIGN_TYPE.MASS_TRANSFER:
+                        return utils.isMyPublicKey(tx.senderPublicKey) ? TYPES.MASS_SEND : TYPES.MASS_RECEIVE;
+                    case SIGN_TYPE.EXCHANGE:
+                        return tx.exchangeType === 'buy' ? TYPES.EXCHANGE_BUY : TYPES.EXCHANGE_SELL;
+                    case SIGN_TYPE.LEASE:
+                        return utils.isMyPublicKey(tx.senderPublicKey) ? TYPES.LEASE_OUT : TYPES.LEASE_IN;
+                    case SIGN_TYPE.CANCEL_LEASING:
+                        return TYPES.CANCEL_LEASING;
+                    case SIGN_TYPE.CREATE_ALIAS:
+                        return TYPES.CREATE_ALIAS;
+                    case SIGN_TYPE.ISSUE:
+                        return TYPES.ISSUE;
+                    case SIGN_TYPE.REISSUE:
+                        return TYPES.REISSUE;
+                    case SIGN_TYPE.BURN:
+                        return TYPES.BURN;
+                    case SIGN_TYPE.DATA:
+                        return TYPES.DATA;
+                    case SIGN_TYPE.SET_SCRIPT:
+                        return (tx.script || '').replace('base64:', '') ? TYPES.SET_SCRIPT : TYPES.SCRIPT_CANCEL;
+                    case SIGN_TYPE.SPONSORSHIP:
+                        return tx.minSponsoredAssetFee.getCoins().gt(0) ? SPONSOR_START : SPONSOR_STOP;
+                    case SIGN_TYPE.SET_ASSET_SCRIPT:
+                        return TYPES.SET_ASSET_SCRIPT;
+                    default:
+                        return TYPES.UNKNOWN;
+                }
+            },
+
+            /**
+             * @name app.utils#isMyPublicKey
+             * @param publicKey
+             * @return {boolean}
+             */
+            isMyPublicKey(publicKey) {
+                /**
+                 * @type {User}
+                 */
+                const user = $injector.get('user');
+                return !publicKey || user.publicKey === publicKey;
+            },
+
+            /**
+             * @name app.utils#isMyAddressOrAlias
+             * @param {string} addressOrAlias
+             * @return boolean
+             */
+            isMyAddressOrAlias(addressOrAlias) {
+                /**
+                 * @type {User}
+                 */
+                const user = $injector.get('user');
+                const aliasList = ds.dataManager.getLastAliases();
+
+                return addressOrAlias === user.address || aliasList.includes(addressOrAlias);
+            },
+
+
+            /**
              * @name app.utils#isNotEqualValue
              * @param {*} oldValue
              * @param {*} newValue
              */
-            isNotEqualValue: isNotEqualValue
+            isNotEqualValue: isNotEqualValue,
+
+            /**
+             * @name app.utils#createOrder
+             * @param {app.utils.IOrderData} data
+             * @return {Promise}
+             */
+            createOrder(data) {
+                const timestamp = ds.utils.normalizeTime(Date.now());
+                /**
+                 * @type {INotification}
+                 */
+                const notification = $injector.get('notification');
+                /**
+                 * @type {ModalManager}
+                 */
+                const modalManager = $injector.get('modalManager');
+                /**
+                 * @type {User}
+                 */
+                const user = $injector.get('user');
+                /**
+                 * @type {boolean}
+                 */
+                const isAdvancedMode = user.getSetting('advancedMode');
+                /**
+                 * @type {number | undefined}
+                 */
+                const version = user.hasScript() ? 2 : undefined;
+
+                const scriptedErrorMessage = `Order rejected by script for ${user.address}`;
+
+                const signableData = {
+                    type: SIGN_TYPE.CREATE_ORDER,
+                    data: { ...data, version, timestamp }
+                };
+
+                const onError = error => {
+                    notification.error({
+                        ns: 'app.dex',
+                        title: {
+                            literal: 'directives.createOrder.notifications.error.title'
+                        },
+                        body: {
+                            literal: error && error.message || error
+                        }
+                    }, -1);
+
+                    return Promise.reject(error);
+                };
+
+                return utils.createSignable(signableData)
+                    .then(signable => {
+                        return utils.signMatcher(signable)
+                            .then(signable => signable.getDataForApi())
+                            .then(ds.createOrder)
+                            .catch(error => {
+                                if (!isAdvancedMode || error.message !== scriptedErrorMessage) {
+                                    return Promise.reject(error);
+                                }
+
+                                return modalManager.showConfirmTx(signable, false)
+                                    .then(ds.createOrder, () => null);
+                            });
+                    })
+                    .catch(onError);
+
+            },
+
+            /**
+             * @name app.utils#createSignable
+             * @param {*} data
+             * @return {Promise<Signable>}
+             */
+            createSignable(data) {
+                try {
+                    return Promise.resolve(ds.signature.getSignatureApi().makeSignable(data));
+                } catch (e) {
+                    return Promise.reject(e);
+                }
+            },
+
+            /**
+             * @name app.utils#signUserOrders
+             * @param {{[matcherSign]: {[timestamp]: number, [timestamp]: number}}} data
+             * @return {Promise<{signature: string, timestamp: number}>}
+             */
+            signUserOrders(data) {
+                try {
+                    const dayForwardTime = ds.app.getTimeStamp(1, 'day');
+                    const lastSignedTs = path(['matcherSign', 'timestamp'], data);
+                    const isNeedSign = !lastSignedTs || lastSignedTs - dayForwardTime < 0;
+
+                    if (!isNeedSign) {
+                        return Promise.resolve(data.matcherSign);
+                    }
+
+                    const timestamp = ds.app.getTimeStamp(
+                        WavesApp.matcherSignInterval.count,
+                        WavesApp.matcherSignInterval.timeType
+                    );
+
+                    const signable = ds.signature.getSignatureApi().makeSignable({
+                        type: SIGN_TYPE.MATCHER_ORDERS,
+                        data: { timestamp }
+                    });
+
+                    return utils.signMatcher(signable)
+                        .then(signable => signable.getSignature())
+                        .then(signature => ({ signature, timestamp }));
+                } catch (e) {
+                    return Promise.reject(e);
+                }
+            },
+
+            /**
+             * @name app.utils#sign
+             * @param {Signable} signable
+             * @return {Promise<Signable>}
+             */
+            signMatcher(signable) {
+                /**
+                 * @type {User}
+                 */
+                const user = $injector.get('user');
+                /**
+                 * @type {ModalManager}
+                 */
+                const modalManager = $injector.get('modalManager');
+
+                if (user.userType === 'seed') {
+                    return signable.addMyProof()
+                        .then(() => signable);
+                }
+
+                const errorParams = { error: 'sign-error', userType: user.userType };
+
+                const signByDeviceLoop = () => modalManager.showSignByDevice(signable)
+                    .catch(() => modalManager.showSignDeviceError(errorParams)
+                        .then(signByDeviceLoop))
+                    .catch(() => Promise.reject({ message: 'Your sign is not confirmed!' }));
+
+                return signByDeviceLoop();
+            }
         };
+
+        /**
+         * @param {api.ITransferTransaction<string>} tx
+         * @private
+         */
+        function _getTransferType(tx) {
+            const meIsSender = isEmpty(tx.senderPublicKey) || utils.isMyPublicKey(tx.senderPublicKey);
+            const meIsRecipient = utils.isMyAddressOrAlias(tx.recipient);
+            const TYPES = WavesApp.TRANSACTION_TYPES.EXTENDED;
+
+            if (!meIsSender && !meIsRecipient) {
+                return TYPES.SPONSORSHIP_FEE;
+            } else if (meIsSender && meIsRecipient) {
+                return TYPES.CIRCULAR;
+            } else {
+                return meIsSender ? TYPES.SEND : TYPES.RECEIVE;
+            }
+        }
 
         /**
          * @param value
@@ -1050,7 +1502,7 @@
                 }
 
                 if (!observer.__events[event]) {
-                    observer.__events[event] = new tsUtils.Signal();
+                    observer.__events[event] = new Signal();
                     keys.forEach((key) => {
                         observer[key].signal.on(() => {
                             observer.__events[event].dispatch();
@@ -1066,7 +1518,7 @@
 
         function isNotEqualValue(oldValue, newValue) {
             if (typeof oldValue === typeof newValue) {
-                if (oldValue instanceof dataEntities.Money && newValue instanceof dataEntities.Money) {
+                if (oldValue instanceof Money && newValue instanceof Money) {
                     return oldValue.asset.id !== newValue.asset.id || oldValue.toTokens() !== newValue.toTokens();
                 } else if (oldValue instanceof BigNumber && newValue instanceof BigNumber) {
                     return !oldValue.eq(newValue);
@@ -1105,7 +1557,7 @@
                     }
 
                     const item = Object.create(null);
-                    item.signal = new tsUtils.Signal();
+                    item.signal = new Signal();
                     item.timer = null;
                     item.value = target[key];
 
@@ -1161,4 +1613,14 @@
     angular.module('app.utils')
         .factory('utils', factory);
 })();
+
+/**
+ * @typedef {object} app.utils#IOrderData
+ * @property {string} orderType
+ * @property {Money} price
+ * @property {Money} amount
+ * @property {Money} matcherFee
+ * @property {string} matcherPublicKey
+ * @property {number} expiration
+ */
 

@@ -1,6 +1,8 @@
 (function () {
     'use strict';
 
+    const { SIGN_TYPE } = require('@waves/signature-adapter');
+
     /**
      * @param $scope
      * @param {Waves} waves
@@ -8,9 +10,10 @@
      * @param {app.utils} utils
      * @param {IPollCreate} createPoll
      * @param {User} user
+     * @param {$mdDialog} $mdDialog
      * @return {AssetSendCtrl}
      */
-    const controller = function ($scope, waves, Base, utils, createPoll, user) {
+    const controller = function ($scope, waves, Base, utils, createPoll, user, $mdDialog) {
 
         class AssetSendCtrl extends Base {
 
@@ -74,8 +77,9 @@
                     outerSendMode: false,
                     gatewayDetails: null,
                     moneyHash: null,
-                    singleSend: Object.create(null),
-                    massSend: Object.create(null)
+                    singleSend: utils.liteObject({ type: SIGN_TYPE.TRANSFER }),
+                    massSend: utils.liteObject({ type: SIGN_TYPE.MASS_TRANSFER }),
+                    toBankMode: false
                 };
                 /**
                  * @type {Poll}
@@ -111,17 +115,24 @@
                 } else {
                     this.tab = 'singleSend';
                     this.state.singleSend.recipient = options.recipient;
+                    this.state.singleSend.attachment = options.attachment;
 
                     Promise.all([
                         ds.moneyFromTokens(options.amount || '0', this.state.assetId),
-                        waves.node.getFee({ type: WavesApp.TRANSACTION_TYPES.NODE.TRANSFER })
+                        waves.node.getFee({ type: SIGN_TYPE.TRANSFER })
                     ]).then(([money, fee]) => {
 
                         this.state.singleSend.amount = money;
                         this.state.singleSend.fee = fee;
 
+                        const tx = waves.node.transactions.createTransaction(this.state.singleSend);
+                        const signable = ds.signature.getSignatureApi().makeSignable({
+                            type: SIGN_TYPE.TRANSFER,
+                            data: tx
+                        });
+
                         if (this.strict) {
-                            this.nextStep();
+                            this.nextStep(signable);
                         }
                     })
                         .catch(() => {
@@ -138,23 +149,15 @@
                 this.step--;
             }
 
-            nextStep(tx) {
-                const types = WavesApp.TRANSACTION_TYPES.NODE;
-                const type = this.tab === 'singleSend' ? types.TRANSFER : types.MASS_TRANSFER;
-
-                tx = tx || (this.tab === 'singleSend' ? { ...this.state.singleSend } : { ...this.state.massSend });
-
-                this.txInfo = waves.node.transactions.createTransaction(type, {
-                    ...tx,
-                    sender: user.address
-                });
-
+            nextStep(signable) {
+                this.signable = signable;
                 this.step++;
             }
 
             onTxSent(id) {
                 if (this.referrer) {
-                    location.href = `${this.referrer}?txId=${id}`;
+                    utils.redirect(`${this.referrer}?txId=${id}`);
+                    $mdDialog.hide();
                 }
             }
 
@@ -230,7 +233,8 @@
         'Base',
         'utils',
         'createPoll',
-        'user'
+        'user',
+        '$mdDialog'
     ];
 
     angular.module('app.utils')
@@ -245,6 +249,7 @@
 
 /**
  * @typedef {object} ISingleSendTx
+ * @property {number} type
  * @property {string} recipient
  * @property {Money} amount
  * @property {Money} fee
@@ -269,10 +274,12 @@
  * @property {string} assetId
  * @property {string} mirrorId
  * @property {boolean} outerSendMode
+ * @property {boolean} toBankMode
  * @property {IGatewayDetails} gatewayDetails
  * @property {Object.<string, Money>} moneyHash
  * @property {ISingleSendTx} singleSend
  * @property {IMassSendTx} massSend
+ * @property {string} warning
  */
 
 /**

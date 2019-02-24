@@ -9,7 +9,10 @@
         class confirmDeleteUserCtrl {
 
             constructor(locals) {
-                this.hasBackup = locals.hasBackup;
+                this.hasBackup = locals.user.settings.hasBackup;
+                this.isSeed = !locals.user.userType || locals.user.userType === 'seed';
+                this.isLedger = locals.user.userType === 'ledger';
+                this.isKeeper = locals.user.userType === 'wavesKeeper';
             }
 
         }

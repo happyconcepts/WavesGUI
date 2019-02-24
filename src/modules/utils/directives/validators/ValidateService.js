@@ -144,7 +144,7 @@
                     return false;
                 }
 
-                if (address.length >= WavesApp.maxAddressLength) {
+                if (address.length > WavesApp.maxAddressLength) {
                     return false;
                 }
 
@@ -156,16 +156,7 @@
                     return false;
                 }
 
-                return waves.node.assets.getBalanceByAddress(address)
-                    .then((data) => {
-                        if (data && data.available != null) {
-                            return $q.resolve();
-                        } else {
-                            return $q.reject();
-                        }
-                    }, (e) => {
-                        return $q.reject(e.message);
-                    });
+                return true;
             }
 
             getByteFromString(str) {

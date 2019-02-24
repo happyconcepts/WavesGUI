@@ -107,12 +107,10 @@
 
             checkNext() {
                 const step = ORDER_LIST[this.stepIndex];
-                switch (step) {
-                    case 'noBackupNoMoney':
-                        return this.showBackupWarningPopup();
-                    default:
-                        return $q.when();
+                if (step === 'noBackupNoMoney') {
+                    return this.showBackupWarningPopup();
                 }
+                return $q.when();
             }
 
             resetAddress() {
@@ -138,18 +136,28 @@
                 if (!this.saveUserData) {
                     this.password = Date.now().toString();
                 }
-                const seedData = new ds.Seed(this.seed);
-                const encryptedSeed = seedData.encrypt(this.password);
-                const publicKey = seedData.keyPair.publicKey;
 
-                return user.create({
+                const encryptedSeed = new ds.Seed(this.seed).encrypt(this.password);
+                const userSettings = user.getDefaultUserSettings({ termsAccepted: false });
+
+                const newUser = {
+                    userType: this.restoreType,
                     address: this.address,
                     name: this.name,
                     password: this.password,
-                    encryptedSeed,
-                    publicKey,
-                    api: ds.signature.getDefaultSignatureApi(seedData.keyPair, this.address, seedData.phrase),
-                    saveToStorage: this.saveUserData
+                    id: this.userId,
+                    path: this.userPath,
+                    settings: userSettings,
+                    saveToStorage: this.saveUserData,
+                    encryptedSeed
+                };
+
+                const api = ds.signature.getDefaultSignatureApi(newUser);
+
+                return user.create({
+                    ...newUser,
+                    settings: userSettings.getSettings(),
+                    api
                 }, hasBackup);
             }
 

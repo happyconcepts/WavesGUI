@@ -11,7 +11,7 @@
             i18next.on('initialized', resolve);
         });
 
-        const escape = function (text) {
+        const escape = function (text = '') {
             return text.split('').map((char) => {
                 switch (char.charCodeAt(0)) {
                     case 34: // "
@@ -51,7 +51,7 @@
                     ns = 'app';
                 }
                 const translate = [`${ns}:${literal}`];
-                if (ns && ns !== 'app') {
+                if (ns !== 'app') {
                     translate.push(`app:${literal}`);
                 }
                 if (skipErrors) {

@@ -15,7 +15,6 @@
     const controller = function (Base, readFile, $scope, utils, validateService, waves, user, decorators) {
 
         const Papa = require('papaparse');
-        const TYPE = WavesApp.TRANSACTION_TYPES.NODE.MASS_TRANSFER;
 
         class MassSend extends Base {
 
@@ -86,6 +85,10 @@
                  * @type {boolean}
                  */
                 this.importError = false;
+                /**
+                 * @type {boolean}
+                 */
+                this.hasFee = false;
             }
 
             $postLink() {
@@ -102,20 +105,23 @@
                 this.tx.transfers = transfers;
 
                 const onHasMoneyHash = () => {
-                    const signal = utils.observe(this.state.massSend, 'transfers');
+                    const changeTransfers = utils.observe(this.state.massSend, 'transfers');
+                    const changeAssetId = utils.observe(this.state, 'assetId');
 
-                    this.receive(utils.observe(this.state, 'assetId'), this._onChangeAssetId, this);
+                    this.receive(changeAssetId, this._onChangeAssetId, this);
 
                     this.observe(['transfers', 'errors'], this._updateTxList);
                     this.observe('totalAmount', this._validate);
                     this.observe('transfers', this._updateTextAreaContent);
                     this.observe('recipientCsv', this._onChangeCSVText);
-                    this.receive(signal, this._calculateTotalAmount, this);
-                    this.receive(signal, this._validate, this);
-                    this.receive(signal, this._calculateFee, this);
+                    this.receive(changeTransfers, this._calculateTotalAmount, this);
+                    this.receive(changeTransfers, this._validate, this);
+                    this.receive(changeTransfers, this._calculateFee, this);
+                    this.receive(changeAssetId, this._calculateFee, this);
+                    this.receive(utils.observe(this.state.massSend, 'fee'), this._currentHasFee, this);
 
                     this.transfers = this.tx.transfers.slice();
-                    signal.dispatch();
+                    changeTransfers.dispatch();
                 };
 
                 if (this.state.moneyHash) {
@@ -157,7 +163,17 @@
             }
 
             nextStep() {
-                this.onContinue({ tx: { ...this.tx } });
+                const tx = waves.node.transactions.createTransaction(this.tx);
+                const signable = ds.signature.getSignatureApi().makeSignable({
+                    type: tx.type,
+                    data: tx
+                });
+
+                return signable;
+            }
+
+            onTxSign(signable) {
+                this.onContinue({ signable });
             }
 
             /**
@@ -182,6 +198,19 @@
             /**
              * @private
              */
+            _currentHasFee() {
+                if (!this.state || !this.state.massSend || !this.state.massSend.fee) {
+                    return null;
+                }
+
+                const fee = this.state.massSend.fee;
+                const moneyHash = this.state.moneyHash;
+                this.hasFee = moneyHash[fee.asset.id] && moneyHash[fee.asset.id].gte(fee);
+            }
+
+            /**
+             * @private
+             */
             _updateTxList() {
                 const list = this.transfers.slice();
                 const errors = utils.toHash(this.errors, 'recipient');
@@ -192,6 +221,7 @@
                 if (MassSend._isNotEqual(this.tx.transfers, transfers)) {
                     this.tx.transfers = transfers;
                 }
+                this._currentHasFee();
             }
 
             /**
@@ -216,7 +246,7 @@
              */
             @decorators.async()
             _calculateFee() {
-                waves.node.getFee({ type: TYPE, tx: this.tx }).then((fee) => {
+                waves.node.getFee(this.tx).then((fee) => {
                     this.tx.fee = fee;
                     $scope.$digest();
                 });

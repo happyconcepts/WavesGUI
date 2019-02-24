@@ -2,15 +2,16 @@
 (function () {
     'use strict';
 
-    const POLL_DELAY = 3000;
+    const POLL_DELAY = 400;
 
     /**
      * @param {app.utils} utils
      * @param {TimeLine} timeLine
      * @param {SymbolInfoService} symbolInfoService
+     * @param {Waves} waves
      * @return {CandlesService}
      */
-    const factory = function (utils, timeLine, symbolInfoService) {
+    const factory = function (utils, timeLine, symbolInfoService, waves) {
 
         class CandlesService {
 
@@ -38,8 +39,16 @@
                     .catch(reject); // TODO
             }
 
-            getBars(symbolInfo, resolution, from, to, onHistoryCallback, onErrorCallback) {
+            getBars(symbolInfo, resolution, from, to = (Date.now() / 1000), onHistoryCallback, onErrorCallback) {
+                from = CandlesService.convertToMilliseconds(from);
+                to = CandlesService.convertToMilliseconds(to);
                 const handleCandles = (candles) => {
+                    candles = CandlesService.filterCandlesByTime(
+                        candles,
+                        from,
+                        to
+                    );
+
                     if (candles.length) {
                         this._updateLastTime(candles);
                         onHistoryCallback(candles);
@@ -52,8 +61,8 @@
 
                 CandlesService._getAndHandleCandles(
                     symbolInfo,
-                    CandlesService.convertToMilliseconds(from),
-                    CandlesService.convertToMilliseconds(to),
+                    from,
+                    to,
                     resolution,
                     handleCandles,
                     onErrorCallback
@@ -62,6 +71,9 @@
 
             subscribeBars(symbolInfo, resolution, onRealtimeCallback, subscriberUID, onResetCacheNeededCallback) {
                 this._subscriber = subscriberUID;
+
+                const from = this._lastTime;
+                const to = Date.now();
 
                 const handleCandles = (candles) => {
                     if (this._subscriber !== subscriberUID) {
@@ -78,15 +90,17 @@
 
                     if (candles.length) {
                         this._updateLastTime(candles);
-                        candles.forEach(onRealtimeCallback);
+                        CandlesService
+                            .filterCandlesByTime(candles, from, to)
+                            .forEach(onRealtimeCallback);
                     }
                 };
 
                 timeLine.timeout(() => {
                     CandlesService._getAndHandleCandles(
                         symbolInfo,
-                        this._lastTime,
-                        Date.now(),
+                        from,
+                        to,
                         resolution,
                         handleCandles
                     );
@@ -100,7 +114,15 @@
             }
 
             _updateLastTime(candles) {
-                this._lastTime = candles[candles.length - 1].time;
+                const lastTime = candles[candles.length - 1].time;
+                if (this._lastTime >= lastTime) {
+                    return false;
+                }
+                this._lastTime = lastTime;
+            }
+
+            static filterCandlesByTime(candles = [], from, to) {
+                return candles.filter(({ time }) => time <= to && time >= from);
             }
 
             static _getAndHandleCandles(symbolInfo, from, to, resolution, handleCandles, handleError = angular.noop) {
@@ -115,14 +137,25 @@
                     .catch(handleError);
             }
 
-            static _getCandles(symbolInfo, from, to = Date.now(), resolution) {
+            static _getCandles(symbolInfo, from, to, resolution) {
                 const amountId = symbolInfo._wavesData.amountAsset.id;
                 const priceId = symbolInfo._wavesData.priceAsset.id;
                 const interval = CandlesService._normalizeInterval(resolution);
 
                 const path = `${WavesApp.network.api}/candles/${amountId}/${priceId}`;
-                return ds.fetch(`${path}?timeStart=${from}&timeEnd=${to}&interval=${interval}`)
-                    .then((res) => res.candles);
+                return Promise.all([
+                    ds.fetch(`${path}?timeStart=${from}&timeEnd=${to}&interval=${interval}`),
+                    ds.api.pairs.get(amountId, priceId)
+                        .then(pair => waves.matcher.getLastPrice(pair)
+                            .catch(() => null))
+                ])
+                    .then(([res, data]) => {
+                        const candles = res.candles;
+                        if (candles.length && data) {
+                            candles[candles.length - 1].close = Number(data.price.toTokens());
+                        }
+                        return candles;
+                    });
             }
 
             static _normalizeInterval(interval) {
@@ -139,7 +172,7 @@
         return new CandlesService();
     };
 
-    factory.$inject = ['utils', 'timeLine', 'symbolInfoService'];
+    factory.$inject = ['utils', 'timeLine', 'symbolInfoService', 'waves'];
 
     angular.module('app.dex').factory('candlesService', factory);
 })();
